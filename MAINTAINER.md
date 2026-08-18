@@ -15,6 +15,8 @@ no rendering or physics yet.
   Image invariant).
 - `src/board/` — the `Board` class: places validated cards at mm coordinates
   with z-indexes, producing the completed board object.
+- `src/server/` — the localhost web server (`startServer`, `npm run serve`);
+  v0 hello world, not yet connected to the board system.
 - `boards/` — user-written board definition scripts; `test-board.ts` is the
   smoke test (`npm run test-board`, exports face images to `out/`).
 
