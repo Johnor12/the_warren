@@ -6,12 +6,12 @@
  *   face images to out/ for inspection.
  * END */
 
-import { Board } from "../src/board/board";
-import { Card } from "../src/card/card";
-import { solidImage, textImage } from "../src/image/create";
-import { Color, Image } from "../src/image/image";
-import { saveImageAsPng } from "../src/image/png";
-import { mmToPx } from "../src/units/units";
+import { Board } from "../src/board/board.js";
+import { Card } from "../src/card/card.js";
+import { solidImage, textImage } from "../src/image/create.js";
+import { Color, Image } from "../src/image/image.js";
+import { saveImageAsPng } from "../src/image/png.js";
+import { mmToPx } from "../src/units/units.js";
 
 const WHITE: Color = { r: 255, g: 255, b: 255, a: 255 };
 const BLACK: Color = { r: 0, g: 0, b: 0, a: 255 };

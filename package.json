@@ -2,6 +2,7 @@
   "name": "the-warren",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Lightweight playtesting tool for board game prototyping.",
   "scripts": {
     "serve": "tsx src/server/main.ts",

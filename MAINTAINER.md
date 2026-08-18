@@ -26,5 +26,7 @@ Each directory has its own README.md (external API) and MAINTAINER.md
 ## Tooling
 
 - TypeScript (strict, `noEmit`), run directly with `tsx`.
+- ES modules (`"type": "module"`, NodeNext): relative imports must use the
+  `.js` extension.
 - `npm run typecheck` / `npm run test-board`.
 - Only runtime-relevant dependency: `pngjs` (debug image export).

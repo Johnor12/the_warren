@@ -9,7 +9,7 @@
  *   - describe(): human-readable summary of the board for logs.
  * END */
 
-import { Card } from "../card/card";
+import { Card } from "../card/card.js";
 
 export interface PlacedPiece {
   id: number;

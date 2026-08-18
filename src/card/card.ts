@@ -6,8 +6,8 @@
  * - CARD_THICKNESS_MM: fixed card height, for isometric rendering only.
  * END */
 
-import { Image } from "../image/image";
-import { mmToPx } from "../units/units";
+import { Image } from "../image/image.js";
+import { mmToPx } from "../units/units.js";
 
 export const CARD_THICKNESS_MM = 0.3;
 

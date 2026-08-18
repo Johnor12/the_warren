@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PNG } from "pngjs";
-import { Image } from "./image";
+import { Image } from "./image.js";
 
 export function saveImageAsPng(image: Image, path: string): void {
   const png = new PNG({ width: image.width, height: image.height });

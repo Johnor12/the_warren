@@ -6,8 +6,8 @@
  *   5x7 font at the largest integer scale that fits.
  * END */
 
-import { Color, Image } from "./image";
-import { GLYPH_HEIGHT, GLYPH_WIDTH, glyphColumns } from "./font";
+import { Color, Image } from "./image.js";
+import { GLYPH_HEIGHT, GLYPH_WIDTH, glyphColumns } from "./font.js";
 
 export function solidImage(width: number, height: number, color: Color): Image {
   const image = new Image(width, height);
