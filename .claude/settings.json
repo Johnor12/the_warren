@@ -1,0 +1,8 @@
+{
+  "model": "fable",
+  "effortLevel": "xhigh",
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true
+}

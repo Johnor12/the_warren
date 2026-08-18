@@ -1,0 +1,17 @@
+{
+  "name": "the-warren",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightweight playtesting tool for board game prototyping.",
+  "scripts": {
+    "test-board": "tsx boards/test-board.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}
