@@ -17,3 +17,5 @@ the system translates between pixels (images, screen rendering) and dimensions (
 Cards should have a small height (.3 mm), which isn't configurable by the player (simply for isometric satisfaction)
 
 the system's workflow should be: write and modify the typescript board definition file; run that file, which generates a completed board object with card and object entities, each with its coordinates and z-index. then, start a web server, which serves a website rendering the board and applies any player-input to the board. for now, we can assume localhost-only + a single user.
+
+v0 does not need to implement multi-user UI manipulation, but a later version probably will.

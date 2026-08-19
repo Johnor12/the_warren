@@ -1,5 +1,7 @@
 /* START
- * PNG export for Images, used for debugging and inspection.
+ * PNG export for Images.
+ * - encodeImageAsPng(image): encode an Image as a PNG Buffer (for serving
+ *   over HTTP).
  * - saveImageAsPng(image, path): write an Image to disk as a PNG, creating
  *   parent directories as needed.
  * END */
@@ -9,9 +11,13 @@ import { dirname } from "node:path";
 import { PNG } from "pngjs";
 import { Image } from "./image.js";
 
-export function saveImageAsPng(image: Image, path: string): void {
+export function encodeImageAsPng(image: Image): Buffer {
   const png = new PNG({ width: image.width, height: image.height });
   png.data.set(image.pixels);
+  return PNG.sync.write(png);
+}
+
+export function saveImageAsPng(image: Image, path: string): void {
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, PNG.sync.write(png));
+  writeFileSync(path, encodeImageAsPng(image));
 }

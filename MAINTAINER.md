@@ -3,8 +3,9 @@
 A playtesting tool for board game prototyping: components are defined in
 TypeScript (object-oriented, with inheritance), composed into a board object,
 and (eventually) rendered and manipulated in a web UI. See `README.md` for
-the full product vision. Current state: initial component/image/board core;
-no rendering or physics yet.
+the full product vision. Current state: component/image/board core plus a
+v0 isometric renderer (static scene served in the browser); no interaction
+or physics yet.
 
 ## Layout
 
@@ -15,10 +16,15 @@ no rendering or physics yet.
   Image invariant).
 - `src/board/` — the `Board` class: places validated cards at mm coordinates
   with z-indexes, producing the completed board object.
-- `src/server/` — the localhost web server (`startServer`, `npm run serve`);
-  v0 hello world, not yet connected to the board system.
+- `src/render/` — the isometric renderer: `BoardDto` types, board
+  serialization for the server, and `client.ts`, the browser canvas
+  renderer (fixed camera, painter's algorithm).
+- `src/server/` — the localhost web server (`startServer(board)`,
+  `npm run serve`): serves the renderer page, the esbuild-bundled client,
+  `/board.json`, and piece face PNGs.
 - `boards/` — user-written board definition scripts; `test-board.ts` is the
-  smoke test (`npm run test-board`, exports face images to `out/`).
+  smoke test, exporting `buildBoard()` (served by `npm run serve`; run
+  directly it exports face images to `out/`).
 
 Each directory has its own README.md (external API) and MAINTAINER.md
 (per-file responsibilities).
@@ -28,5 +34,6 @@ Each directory has its own README.md (external API) and MAINTAINER.md
 - TypeScript (strict, `noEmit`), run directly with `tsx`.
 - ES modules (`"type": "module"`, NodeNext): relative imports must use the
   `.js` extension.
-- `npm run typecheck` / `npm run test-board`.
-- Only runtime-relevant dependency: `pngjs` (debug image export).
+- `npm run typecheck` / `npm run test-board` / `npm run serve`.
+- Runtime-relevant dependencies: `pngjs` (PNG encoding), `esbuild`
+  (bundles the browser client at server startup).

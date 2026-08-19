@@ -2,10 +2,13 @@
  * Test board definition: a single 41x63mm TestCard placed at the center of a
  * 500x500mm board.
  * - TestCard: white faces with "Front" / "Back" text painted on them.
- * - main(): builds the board, prints its summary, and exports the card's
- *   face images to out/ for inspection.
+ * - buildBoard(): builds and returns the completed board (used by the
+ *   server to render it).
+ * - Run directly (`npm run test-board`): prints the board summary and
+ *   exports the card's face images to out/ for inspection.
  * END */
 
+import { pathToFileURL } from "node:url";
 import { Board } from "../src/board/board.js";
 import { Card } from "../src/card/card.js";
 import { solidImage, textImage } from "../src/image/create.js";
@@ -37,16 +40,18 @@ class TestCard extends Card {
   }
 }
 
-function main(): void {
+export function buildBoard(): Board {
   const board = new Board(500, 500);
-  const card = new TestCard();
-  board.place(card, board.centerX(), board.centerY());
+  board.place(new TestCard(), board.centerX(), board.centerY());
+  return board;
+}
 
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const board = buildBoard();
   console.log(board.describe());
 
+  const card = board.pieces[0].card;
   saveImageAsPng(card.front, "out/test-card-front.png");
   saveImageAsPng(card.back, "out/test-card-back.png");
   console.log("Face images written to out/test-card-front.png and out/test-card-back.png");
 }
-
-main();
