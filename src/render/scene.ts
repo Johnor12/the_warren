@@ -3,16 +3,20 @@
  * of 2D draw ops, so rendering is unit-testable without a browser.
  * - PolygonOp / ImageOp / SceneOp: a color-filled screen polygon, or a
  *   piece face image with the projected top-face corners (origin = image
- *   pixel (0,0), xCorner = (width,0), yCorner = (0,height)).
+ *   pixel (0,0), xCorner = (width,0), yCorner = (0,height)). Face bitmaps
+ *   map to the card shape (transparent outside the outline), so image ops
+ *   need no clipping.
  * - Lift: a piece temporarily raised above the board (while being dragged).
  * - buildScene(board, cam, lift?): board surface polygon, then each piece
  *   back-to-front (painter's algorithm, lifted piece on top) as its
- *   camera-facing side polygons plus its visible-face image op, honoring
- *   each piece's rotation and faceUp state.
- * - pickPiece(board, cam, sx, sy): topmost piece under a screen point.
+ *   camera-facing outline-edge side polygons plus its visible-face image
+ *   op, honoring each piece's rotation and faceUp state.
+ * - pickPiece(board, cam, sx, sy): topmost piece under a screen point
+ *   (point-in-outline-polygon test).
  * - pieceTopMm(piece): height of a piece's top face above the board.
  * END */
 
+import { pointInPolygon } from "../geometry/polygon.js";
 import { Camera, project, unproject } from "./camera.js";
 import { BoardDto, PieceDto } from "./types.js";
 
@@ -79,7 +83,7 @@ export function pickPiece(
     // Into piece-local coordinates: rotate by -rad about the center.
     const lx = dx * Math.cos(rad) + dy * Math.sin(rad);
     const ly = -dx * Math.sin(rad) + dy * Math.cos(rad);
-    return Math.abs(lx) <= piece.widthMm / 2 && Math.abs(ly) <= piece.heightMm / 2;
+    return pointInPolygon(lx, ly, piece.outlineMm);
   });
 }
 
@@ -101,38 +105,40 @@ function pieceOps(piece: PieceDto, cam: Camera, liftMm: number): SceneOp[] {
   const rad = (piece.rotationDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  const corner = (lx: number, ly: number): [number, number] => [
+  const toWorld = ([lx, ly]: [number, number]): [number, number] => [
     piece.xMm + lx * cos - ly * sin,
     piece.yMm + lx * sin + ly * cos,
   ];
   const w = piece.widthMm / 2;
   const h = piece.heightMm / 2;
-  const a = corner(-w, -h); // image pixel (0, 0)
-  const b = corner(w, -h); // image pixel (width, 0)
-  const c = corner(w, h);
-  const d = corner(-w, h); // image pixel (0, height)
+  const a = toWorld([-w, -h]); // image pixel (0, 0)
+  const b = toWorld([w, -h]); // image pixel (width, 0)
+  const d = toWorld([-w, h]); // image pixel (0, height)
+  const outline = piece.outlineMm;
+  const world = outline.map(toWorld);
 
-  // The four side faces; those whose outward normal points towards the
-  // camera (view direction v, in world coordinates) are visible.
+  // One side face per outline edge; those whose outward normal points
+  // towards the camera (view direction v, in world coordinates) are visible.
+  // Mostly-x-facing sides are lighter than mostly-y-facing ones.
   const vx = Math.cos(cam.yaw) + Math.sin(cam.yaw);
   const vy = Math.cos(cam.yaw) - Math.sin(cam.yaw);
-  const sides = [
-    { from: b, to: c, normal: [cos, sin], color: SIDE_COLOR_X },
-    { from: a, to: d, normal: [-cos, -sin], color: SIDE_COLOR_X },
-    { from: d, to: c, normal: [-sin, cos], color: SIDE_COLOR_Y },
-    { from: a, to: b, normal: [sin, -cos], color: SIDE_COLOR_Y },
-  ];
   const ops: SceneOp[] = [];
-  for (const { from, to, normal, color } of sides) {
-    if (normal[0] * vx + normal[1] * vy <= 0) continue;
+  for (let i = 0; i < outline.length; i++) {
+    const j = (i + 1) % outline.length;
+    const ldx = outline[j][0] - outline[i][0];
+    const ldy = outline[j][1] - outline[i][1];
+    // Local outward normal (ldy, -ldx), rotated into world coordinates.
+    const nx = ldy * cos + ldx * sin;
+    const ny = ldy * sin - ldx * cos;
+    if (nx * vx + ny * vy <= 0) continue;
     ops.push({
       kind: "polygon",
-      color,
+      color: Math.abs(ldy) >= Math.abs(ldx) ? SIDE_COLOR_X : SIDE_COLOR_Y,
       points: [
-        project(cam, from[0], from[1], zTop),
-        project(cam, to[0], to[1], zTop),
-        project(cam, to[0], to[1], zBottom),
-        project(cam, from[0], from[1], zBottom),
+        project(cam, world[i][0], world[i][1], zTop),
+        project(cam, world[j][0], world[j][1], zTop),
+        project(cam, world[j][0], world[j][1], zBottom),
+        project(cam, world[i][0], world[i][1], zBottom),
       ],
     });
   }

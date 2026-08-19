@@ -7,15 +7,24 @@ product vision. Current state: component/image/board core plus an isometric
 renderer with camera controls (pan, zoom, rotate) and card interaction
 (drag to move with a visual lift, right-drag to rotate, double click to
 flip, double right click to snap-rotate 45°; the double clicks are
-overridable Card handlers). No stacking physics yet.
+overridable Card handlers). Cards can be non-rectangular (an overridable
+outline polygon, e.g. hexagons) and any size; face bitmaps map to the
+card's 2D shape (opaque only inside the outline, enforced on placement)
+and can be imported from PNG files. No stacking physics yet.
 
 ## Layout
 
 - `src/units/` — mm <-> pixel conversion (`PX_PER_MM`, `mmToPx`, `pxToMm`).
-- `src/image/` — the `Image` RGBA bitmap class, paint composition, and
-  generators (`solidImage`, `textImage`, embedded 5x7 font, PNG export).
-- `src/card/` — the abstract `Card` base class (mm dimensions + front/back
-  Image invariant, overridable double-click interaction handlers).
+- `src/geometry/` — pure 2D polygon math (`pointInPolygon`, scanline
+  `rowSpans`), shared by card validation, image rasterization, and hit
+  testing.
+- `src/image/` — the `Image` RGBA bitmap class, paint composition,
+  generators (`solidImage`, `textImage`, embedded 5x7 font, bilinear
+  `scaledImage`, `polygonImage` shape fill, `maskedImage`), and PNG
+  import/export.
+- `src/card/` — the abstract `Card` base class (mm dimensions, overridable
+  shape outline with rectangle/hexagon builders, front/back Images that
+  must map to the shape, overridable double-click interaction handlers).
 - `src/board/` — the `Board` class: places validated cards at mm coordinates
   with z-indexes, producing the completed board object, and the core
   move/rotate piece mutations.
@@ -27,9 +36,13 @@ overridable Card handlers). No stacking physics yet.
 - `src/server/` — the localhost web server (`startServer(board)`,
   `npm run serve`): serves the renderer page, the esbuild-bundled client,
   `/board.json`, piece face PNGs, and the POST piece interaction routes.
-- `boards/` — user-written board definition scripts; `test-board.ts` is the
-  smoke test, exporting `buildBoard()` (served by `npm run serve`; run
-  directly it exports face images to `out/`).
+- `boards/` — user-written board definition scripts and their `assets/`
+  PNGs; `test-board.ts` is the smoke test (standard, hexagonal, oversized,
+  and PNG-faced cards), exporting `buildBoard()` (served by `npm run serve`;
+  run directly it exports face images to `out/`).
+- `tools/` — dev tooling: `drive.ts`, the headless UI driver (Playwright +
+  installed Edge) behind `npm run drive`, for agent-driven screenshot
+  verification of the running server. Recipe: `.claude/skills/run-board/`.
 
 Each directory has its own README.md (external API) and MAINTAINER.md
 (per-file responsibilities).
@@ -39,6 +52,8 @@ Each directory has its own README.md (external API) and MAINTAINER.md
 - TypeScript (strict, `noEmit`), run directly with `tsx`.
 - ES modules (`"type": "module"`, NodeNext): relative imports must use the
   `.js` extension.
-- `npm run typecheck` / `npm test` / `npm run test-board` / `npm run serve`.
+- `npm run typecheck` / `npm test` / `npm run test-board` / `npm run serve`
+  / `npm run drive` (headless UI verification; see `tools/`).
 - Runtime-relevant dependencies: `pngjs` (PNG encoding), `esbuild`
-  (bundles the browser client at server startup).
+  (bundles the browser client at server startup), `playwright` (dev only,
+  drives installed Edge for `npm run drive` — no downloaded browser).

@@ -212,6 +212,8 @@ function render(
   }
 }
 
+// Face bitmaps map to the card shape (transparent outside the outline), so
+// the whole bitmap is drawn onto the projected top face with no clipping.
 function drawImageOp(ctx: CanvasRenderingContext2D, op: ImageOp, image: HTMLImageElement): void {
   const [ex, ey] = op.origin;
   ctx.setTransform(

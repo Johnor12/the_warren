@@ -26,8 +26,10 @@ handlers on the server.
   `rotateAbout` — the pure camera model and its mutations (DOM-free,
   unit tested).
 - `buildScene(board, cam, lift?)` — the ordered 2D draw ops for a board as
-  seen by a camera, honoring piece rotation/face state and an optional
-  lifted piece (DOM-free, unit tested).
+  seen by a camera, honoring each piece's shape outline (side faces per
+  outline edge; face bitmaps carry the shape via transparency),
+  rotation/face state, and an optional lifted piece (DOM-free, unit
+  tested).
 - `pickPiece(board, cam, sx, sy)` / `pieceTopMm(piece)` — hit testing.
 - `client.ts` — browser entry point; not imported by server code, but
   bundled (esbuild) and served as `/client.js`.

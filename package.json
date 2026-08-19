@@ -6,14 +6,16 @@
   "description": "Lightweight playtesting tool for board game prototyping.",
   "scripts": {
     "serve": "tsx src/server/main.ts",
+    "drive": "tsx tools/drive.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "test-board": "tsx boards/test-board.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "esbuild": "~0.28.0",
     "@types/pngjs": "^6.0.5",
+    "esbuild": "~0.28.0",
+    "playwright": "^1.62.1",
     "pngjs": "^7.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0"

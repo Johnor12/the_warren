@@ -7,5 +7,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "boards/**/*.ts"]
+  "include": ["src/**/*.ts", "boards/**/*.ts", "tools/**/*.ts"]
 }

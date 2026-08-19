@@ -22,6 +22,7 @@ export function boardToDto(board: Board): BoardDto {
       id: piece.id,
       widthMm: piece.card.widthMm,
       heightMm: piece.card.heightMm,
+      outlineMm: piece.card.outlineMm(),
       thicknessMm: CARD_THICKNESS_MM,
       zIndex: piece.zIndex,
       frontUrl: `/pieces/${piece.id}/front.png`,

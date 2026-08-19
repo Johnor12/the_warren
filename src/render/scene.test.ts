@@ -3,14 +3,15 @@
  * the emitted draw ops — then apply each camera mutation (pan, zoom,
  * rotate) and confirm the scene renders as expected: shifted points,
  * scaled points, flipped draw order and side faces. Also covers piece
- * state rendering (rotation, face-down, lift) and pickPiece hit testing.
+ * state rendering (rotation, face-down, lift), pickPiece hit testing, and
+ * non-rectangular outlines (hexagon sides, image clip, hit testing).
  * END */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Board } from "../board/board.js";
-import { Card } from "../card/card.js";
-import { solidImage } from "../image/create.js";
+import { Card, hexagonOutline, Outline } from "../card/card.js";
+import { polygonImage, solidImage } from "../image/create.js";
 import { Image } from "../image/image.js";
 import { Camera, fitCamera, pan, project, rotateAbout, zoomAbout } from "./camera.js";
 import { buildScene, ImageOp, pickPiece, SceneOp } from "./scene.js";
@@ -146,11 +147,49 @@ test("rotating a half turn flips draw order and the visible faces", () => {
   );
   // Board corner (0, 0) now projects where corner (200, 100) did.
   assertClose(project(cam, 0, 0, 0), project(CAM, 200, 100, 0));
-  // Piece 1's x-side polygon (ops[4]) now shows the face at x0 = 45.
-  assert.equal(ops[4].kind, "polygon");
-  const sideX = (ops[4] as { points: [number, number][] }).points;
-  assertClose(sideX[0], project(cam, 45, 45, Z_TOP));
-  assertClose(sideX[1], project(cam, 45, 55, Z_TOP));
-  assertClose(sideX[2], project(cam, 45, 55, 0));
-  assertClose(sideX[3], project(cam, 45, 45, 0));
+  // Piece 1's x-side polygon now shows the face at x0 = 45. Sides are
+  // emitted in outline-edge order, so the -y side (ops[4]) comes before
+  // this -x side (ops[5], edge d -> a).
+  assert.equal(ops[5].kind, "polygon");
+  const sideX = (ops[5] as { points: [number, number][] }).points;
+  assertClose(sideX[0], project(cam, 45, 55, Z_TOP));
+  assertClose(sideX[1], project(cam, 45, 45, Z_TOP));
+  assertClose(sideX[2], project(cam, 45, 45, 0));
+  assertClose(sideX[3], project(cam, 45, 55, 0));
+});
+
+class HexTestCard extends Card {
+  readonly widthMm = 95;
+  readonly heightMm = 83;
+  readonly front: Image = polygonImage(950, 830, this.outlinePx(), { r: 200, g: 60, b: 60, a: 255 });
+  readonly back: Image = polygonImage(950, 830, this.outlinePx(), { r: 60, g: 60, b: 200, a: 255 });
+
+  override outlineMm(): Outline {
+    return hexagonOutline(this.widthMm, this.heightMm);
+  }
+}
+
+// A 200x100mm board with one hexagonal piece centered at (100, 50).
+function makeHexBoard(): BoardDto {
+  const board = new Board(200, 100);
+  board.place(new HexTestCard(), 100, 50);
+  return boardToDto(board);
+}
+
+test("a hexagonal piece renders its camera-facing sides and face image", () => {
+  const ops = buildScene(makeHexBoard(), CAM);
+  // Board polygon + 3 of the hexagon's 6 sides face the default camera + image.
+  assert.equal(ops.length, 1 + 3 + 1);
+  // The image quad spans the full bounding box; the bitmap itself is
+  // hexagonal (transparent outside the outline), so no clipping is needed.
+  const op = imageOps(ops)[0];
+  assertClose(op.origin, project(CAM, 100 - 47.5, 50 - 41.5, Z_TOP));
+});
+
+test("pickPiece tests against the hexagonal outline, not the bounding box", () => {
+  const board = makeHexBoard();
+  // Near the left vertex: inside the hexagon.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, Z_TOP))?.id, 1);
+  // Inside the bounding box but outside the hexagon's top-left slope.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 10, Z_TOP)), undefined);
 });
