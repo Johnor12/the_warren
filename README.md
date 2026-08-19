@@ -6,9 +6,9 @@ the system would render these definitions onto a flat isometric plane and implem
 
 the system explicitly does not support gameplay scripting/logic; it's simply a piece simulator.
 
-the system would also offer a deck layout phase as part of the typescript program; defining the size of the playing space and where each piece starts on it. pieces in scope in the program are identified by a globally unique id/handle, and all exist in a ghost space which is not rendered by the engine. pieces are rendered when the script makes an initial "ghost -> coordinates" move.
+the system would also offer a board layout phase as part of the typescript program; defining the size of the playing space and where each piece starts on it. pieces in scope in the program are identified by a globally unique id/handle, and all exist in a ghost space which is not rendered by the engine. pieces are rendered when the script makes an initial "ghost -> coordinates" move.
 
-the system should also offer the user the ability to flip and rotate (any number of degrees by holding a rotate button, 90 degrees by double clicking, behavior overwritable as part of the class system) Cards and Objects.
+the system should also offer the user the ability to flip and rotate (double click to flip, any number of degrees by holding the right click button + dragging, double right click to rotate 45 degrees, behavior overwritable as part of the class system) Cards and Objects.
 
 the system should allow the user to pan around the table, rotate their POV around the current focal point, and zoom in and out.
 

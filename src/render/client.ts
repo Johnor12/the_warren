@@ -1,30 +1,48 @@
 /* START
  * Browser entry point: a thin shell over camera.ts + scene.ts. Fetches the
- * board, loads face images, applies mouse input as pure camera mutations,
- * and rasterizes the scene ops onto <canvas id="board">.
+ * board, loads face images, applies mouse input, and rasterizes the scene
+ * ops onto <canvas id="board">.
  * - main(): fetch /board.json, preload images, wire controls, draw;
- *   redraws on resize and on camera changes.
- * - setupControls(): left-drag pans, mouse wheel zooms about the cursor,
- *   right-drag left/right rotates the view around the screen center.
+ *   redraws on resize and on camera/piece changes.
+ * - setupControls(): the gesture state machine. On a piece: left-drag moves
+ *   it (lifted above the board while moving), right-drag rotates it, double
+ *   click / double right click POST to the server, which runs the card's
+ *   overridable handlers (flip / snap-rotate 45°). On empty board: left-drag
+ *   pans, right-drag rotates the view, mouse wheel zooms about the cursor.
+ *   Drag results are committed to the server on mouseup.
  * - render() and helpers: clear to the table color, then draw each SceneOp
  *   (polygon fill, or face image via a canvas transform).
  * END */
 
-import { Camera, fitCamera, pan, rotateAbout, zoomAbout } from "./camera.js";
-import { buildScene, ImageOp, SceneOp } from "./scene.js";
-import { BoardDto } from "./types.js";
+import { Camera, fitCamera, pan, rotateAbout, unproject, zoomAbout } from "./camera.js";
+import { buildScene, ImageOp, Lift, pickPiece, pieceTopMm, SceneOp } from "./scene.js";
+import { BoardDto, PieceDto, PieceStateDto } from "./types.js";
 
 const TABLE_COLOR = "#1e242b";
 const ZOOM_RATE = 0.001; // zoom factor exponent per wheel delta unit
-const ROTATE_RATE = 0.01; // radians of yaw per px of horizontal drag
+const ROTATE_RATE = 0.01; // camera: radians of yaw per px of horizontal drag
+const SPIN_RATE = 0.5; // piece: degrees per px of horizontal drag
+const LIFT_MM = 20; // how high a card rises while being moved
+const CLICK_PX = 5; // max cursor travel for a press to count as a click
+const DOUBLE_MS = 400; // max delay between the two clicks of a double click
+
+interface Ctx {
+  board: BoardDto;
+  cam: Camera;
+  lift: Lift | null;
+  canvas: HTMLCanvasElement;
+  images: Map<string, HTMLImageElement>;
+}
 
 async function main(): Promise<void> {
   const board: BoardDto = await (await fetch("/board.json")).json();
   const images = new Map<string, HTMLImageElement>();
   await Promise.all(
-    board.pieces.map(async (piece) => {
-      images.set(piece.frontUrl, await loadImage(piece.frontUrl));
-    }),
+    board.pieces
+      .flatMap((piece) => [piece.frontUrl, piece.backUrl])
+      .map(async (url) => {
+        images.set(url, await loadImage(url));
+      }),
   );
   const canvas = document.getElementById("board") as HTMLCanvasElement;
   const resize = () => {
@@ -32,17 +50,23 @@ async function main(): Promise<void> {
     canvas.height = window.innerHeight;
   };
   resize();
-  let cam = fitCamera(board, canvas.width, canvas.height);
-  const draw = () => render(canvas, buildScene(board, cam), images);
-  setupControls(canvas, (mutate) => {
-    cam = mutate(cam);
-    draw();
-  });
+  const ctx: Ctx = {
+    board,
+    cam: fitCamera(board, canvas.width, canvas.height),
+    lift: null,
+    canvas,
+    images,
+  };
+  setupControls(ctx);
   window.addEventListener("resize", () => {
     resize();
-    draw();
+    draw(ctx);
   });
-  draw();
+  draw(ctx);
+}
+
+function draw(ctx: Ctx): void {
+  render(ctx.canvas, buildScene(ctx.board, ctx.cam, ctx.lift ?? undefined), ctx.images);
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -54,43 +78,124 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function setupControls(
-  canvas: HTMLCanvasElement,
-  apply: (mutate: (cam: Camera) => Camera) => void,
-): void {
+type Gesture =
+  | { kind: "pan" }
+  | { kind: "orbit" }
+  | { kind: "move"; piece: PieceDto; grabXMm: number; grabYMm: number }
+  | { kind: "spin"; piece: PieceDto };
+
+function setupControls(ctx: Ctx): void {
+  const canvas = ctx.canvas;
   canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-  let dragging: "pan" | "rotate" | null = null;
+  let gesture: Gesture | null = null;
+  let button = 0;
+  let startX = 0; // mousedown position, for the click-vs-drag threshold
+  let startY = 0;
   let lastX = 0;
   let lastY = 0;
+  let dragging = false; // true once the cursor leaves the click threshold
+  let lastClick: { button: number; pieceId: number; time: number } | null = null;
 
   canvas.addEventListener("mousedown", (e) => {
-    dragging = e.button === 0 ? "pan" : e.button === 2 ? "rotate" : null;
-    lastX = e.clientX;
-    lastY = e.clientY;
-  });
-  window.addEventListener("mouseup", () => {
-    dragging = null;
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!dragging) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    if (dragging === "pan") {
-      apply((cam) => pan(cam, dx, dy));
+    if (gesture || (e.button !== 0 && e.button !== 2)) return;
+    button = e.button;
+    startX = lastX = e.clientX;
+    startY = lastY = e.clientY;
+    dragging = false;
+    const piece = pickPiece(ctx.board, ctx.cam, e.clientX, e.clientY);
+    if (!piece) {
+      gesture = { kind: button === 0 ? "pan" : "orbit" };
+    } else if (button === 0) {
+      const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(piece));
+      gesture = { kind: "move", piece, grabXMm: wx - piece.xMm, grabYMm: wy - piece.yMm };
     } else {
-      apply((cam) => rotateAbout(cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE));
+      gesture = { kind: "spin", piece };
     }
   });
+
+  window.addEventListener("mousemove", (e) => {
+    if (!gesture) return;
+    const dx = e.clientX - lastX;
+    lastX = e.clientX;
+    const dy = e.clientY - lastY;
+    lastY = e.clientY;
+    if (!dragging) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < CLICK_PX) return;
+      dragging = true;
+      if (gesture.kind === "move") {
+        ctx.lift = { pieceId: gesture.piece.id, liftMm: LIFT_MM };
+      }
+    }
+    if (gesture.kind === "pan") {
+      ctx.cam = pan(ctx.cam, dx, dy);
+    } else if (gesture.kind === "orbit") {
+      ctx.cam = rotateAbout(ctx.cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE);
+    } else if (gesture.kind === "move") {
+      // The cursor drags the piece's footprint; the lift is visual only.
+      const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(gesture.piece));
+      gesture.piece.xMm = clamp(wx - gesture.grabXMm, 0, ctx.board.widthMm);
+      gesture.piece.yMm = clamp(wy - gesture.grabYMm, 0, ctx.board.heightMm);
+    } else {
+      gesture.piece.rotationDeg += dx * SPIN_RATE;
+    }
+    draw(ctx);
+  });
+
+  window.addEventListener("mouseup", (e) => {
+    if (!gesture || e.button !== button) return;
+    const done = gesture;
+    gesture = null;
+    if (done.kind === "pan" || done.kind === "orbit") return;
+    if (!dragging) {
+      handleClick(done.piece);
+    } else if (done.kind === "move") {
+      ctx.lift = null;
+      draw(ctx);
+      commit(done.piece, "move", { xMm: done.piece.xMm, yMm: done.piece.yMm });
+    } else {
+      commit(done.piece, "rotate", { rotationDeg: done.piece.rotationDeg });
+    }
+  });
+
   canvas.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      apply((cam) => zoomAbout(cam, e.clientX, e.clientY, Math.exp(-e.deltaY * ZOOM_RATE)));
+      ctx.cam = zoomAbout(ctx.cam, e.clientX, e.clientY, Math.exp(-e.deltaY * ZOOM_RATE));
+      draw(ctx);
     },
     { passive: false },
   );
+
+  function handleClick(piece: PieceDto): void {
+    const now = performance.now();
+    const isDouble =
+      lastClick !== null &&
+      lastClick.button === button &&
+      lastClick.pieceId === piece.id &&
+      now - lastClick.time < DOUBLE_MS;
+    lastClick = isDouble ? null : { button, pieceId: piece.id, time: now };
+    if (!isDouble) return;
+    commit(piece, button === 0 ? "double-click" : "double-right-click");
+  }
+
+  // POST a piece action; the server responds with the authoritative piece
+  // state (double-click actions run the card's overridable handlers there).
+  async function commit(piece: PieceDto, action: string, body?: unknown): Promise<void> {
+    const res = await fetch(`/pieces/${piece.id}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`${action} failed: ${res.status}`);
+    const state: PieceStateDto = await res.json();
+    Object.assign(piece, state);
+    draw(ctx);
+  }
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function render(

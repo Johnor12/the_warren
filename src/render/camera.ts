@@ -4,8 +4,8 @@
  * - Camera: scale (px per mm), yaw (radians), screen offset of the world
  *   origin.
  * - fitCamera(board, viewW, viewH): initial camera framing the whole board.
- * - project(cam, x, y, z) / unproject(cam, sx, sy): world mm <-> screen px
- *   (unproject on the z=0 plane).
+ * - project(cam, x, y, z) / unproject(cam, sx, sy, z?): world mm <-> screen
+ *   px (unproject on the horizontal plane at height z, default 0).
  * - pan(cam, dx, dy): slide the view by a screen-px delta.
  * - zoomAbout(cam, sx, sy, factor): scale by factor (clamped to MIN_SCALE
  *   ..MAX_SCALE), keeping the world point under screen (sx, sy) fixed.
@@ -51,10 +51,10 @@ export function project(cam: Camera, xMm: number, yMm: number, zMm: number): [nu
   ];
 }
 
-// Inverse of project() on the z=0 plane: screen px -> world mm.
-export function unproject(cam: Camera, sx: number, sy: number): [number, number] {
+// Inverse of project() on the horizontal plane at height zMm: screen px -> world mm.
+export function unproject(cam: Camera, sx: number, sy: number, zMm = 0): [number, number] {
   const u = (sx - cam.offsetX) / (COS * cam.s);
-  const v = (sy - cam.offsetY) / (SIN * cam.s);
+  const v = (sy + zMm * cam.s - cam.offsetY) / (SIN * cam.s);
   const rx = (u + v) / 2;
   const ry = (v - u) / 2;
   const cos = Math.cos(cam.yaw);

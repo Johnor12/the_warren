@@ -2,10 +2,12 @@
 
 A playtesting tool for board game prototyping: components are defined in
 TypeScript (object-oriented, with inheritance), composed into a board object,
-and (eventually) rendered and manipulated in a web UI. See `README.md` for
-the full product vision. Current state: component/image/board core plus an
-isometric renderer with camera controls (pan, zoom, rotate); no piece
-interaction or physics yet.
+and rendered and manipulated in a web UI. See `README.md` for the full
+product vision. Current state: component/image/board core plus an isometric
+renderer with camera controls (pan, zoom, rotate) and card interaction
+(drag to move with a visual lift, right-drag to rotate, double click to
+flip, double right click to snap-rotate 45°; the double clicks are
+overridable Card handlers). No stacking physics yet.
 
 ## Layout
 
@@ -13,16 +15,18 @@ interaction or physics yet.
 - `src/image/` — the `Image` RGBA bitmap class, paint composition, and
   generators (`solidImage`, `textImage`, embedded 5x7 font, PNG export).
 - `src/card/` — the abstract `Card` base class (mm dimensions + front/back
-  Image invariant).
+  Image invariant, overridable double-click interaction handlers).
 - `src/board/` — the `Board` class: places validated cards at mm coordinates
-  with z-indexes, producing the completed board object.
+  with z-indexes, producing the completed board object, and the core
+  move/rotate piece mutations.
 - `src/render/` — the isometric renderer: `BoardDto` types, board
-  serialization for the server, the pure camera model and scene builder
-  (unit tested), and `client.ts`, the browser shell mapping mouse input
-  to camera mutations and rasterizing the scene.
+  serialization for the server, the pure camera model, scene builder, and
+  hit testing (unit tested), and `client.ts`, the browser shell mapping
+  mouse input to camera mutations and piece interactions and rasterizing
+  the scene.
 - `src/server/` — the localhost web server (`startServer(board)`,
   `npm run serve`): serves the renderer page, the esbuild-bundled client,
-  `/board.json`, and piece face PNGs.
+  `/board.json`, piece face PNGs, and the POST piece interaction routes.
 - `boards/` — user-written board definition scripts; `test-board.ts` is the
   smoke test, exporting `buildBoard()` (served by `npm run serve`; run
   directly it exports face images to `out/`).

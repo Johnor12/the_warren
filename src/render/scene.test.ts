@@ -1,8 +1,9 @@
 /* START
- * Unit tests for buildScene (scene.ts): build a real Board, serialize it,
- * and confirm the emitted draw ops — then apply each camera mutation (pan,
- * zoom, rotate) and confirm the scene renders as expected: shifted points,
- * scaled points, flipped draw order and side faces.
+ * Unit tests for scene.ts: build a real Board, serialize it, and confirm
+ * the emitted draw ops — then apply each camera mutation (pan, zoom,
+ * rotate) and confirm the scene renders as expected: shifted points,
+ * scaled points, flipped draw order and side faces. Also covers piece
+ * state rendering (rotation, face-down, lift) and pickPiece hit testing.
  * END */
 
 import { test } from "node:test";
@@ -12,7 +13,7 @@ import { Card } from "../card/card.js";
 import { solidImage } from "../image/create.js";
 import { Image } from "../image/image.js";
 import { Camera, fitCamera, pan, project, rotateAbout, zoomAbout } from "./camera.js";
-import { buildScene, ImageOp, SceneOp } from "./scene.js";
+import { buildScene, ImageOp, pickPiece, SceneOp } from "./scene.js";
 import { boardToDto } from "./serialize.js";
 import { BoardDto } from "./types.js";
 
@@ -91,6 +92,48 @@ test("zoom scales every rendered point about the cursor", () => {
   before.forEach(([x, y], i) => {
     assertClose(after[i], [cx + 2 * (x - cx), cy + 2 * (y - cy)]);
   });
+});
+
+test("a rotated piece's image op spans its rotated top face", () => {
+  const board = makeBoard();
+  board.pieces[0].rotationDeg = 90;
+  const op = imageOps(buildScene(board, CAM))[0];
+  assertClose(op.origin, project(CAM, 55, 45, Z_TOP));
+  assertClose(op.xCorner, project(CAM, 55, 55, Z_TOP));
+  assertClose(op.yCorner, project(CAM, 45, 45, Z_TOP));
+});
+
+test("a face-down piece renders its back image", () => {
+  const board = makeBoard();
+  board.pieces[1].faceUp = false;
+  assert.deepEqual(
+    imageOps(buildScene(board, CAM)).map((op) => op.url),
+    ["/pieces/1/front.png", "/pieces/2/back.png"],
+  );
+});
+
+test("a lifted piece rises by liftMm and is drawn on top", () => {
+  const ops = buildScene(BOARD, CAM, { pieceId: 1, liftMm: 20 });
+  assert.deepEqual(
+    imageOps(ops).map((op) => op.url),
+    ["/pieces/2/front.png", "/pieces/1/front.png"],
+  );
+  assertClose(imageOps(ops)[1].origin, project(CAM, 45, 45, 20 + Z_TOP));
+});
+
+test("pickPiece finds the piece under a screen point", () => {
+  assert.equal(pickPiece(BOARD, CAM, ...project(CAM, 50, 50, Z_TOP))?.id, 1);
+  assert.equal(pickPiece(BOARD, CAM, ...project(CAM, 152, 48, Z_TOP))?.id, 2);
+  assert.equal(pickPiece(BOARD, CAM, ...project(CAM, 100, 20, Z_TOP)), undefined);
+});
+
+test("pickPiece tests against the rotated footprint", () => {
+  const board = makeBoard();
+  board.pieces[0].rotationDeg = 45;
+  // (56, 50) is outside the unrotated 10x10 footprint but inside the
+  // rotated one; (54.5, 54.5) is the opposite.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 56, 50, Z_TOP))?.id, 1);
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54.5, 54.5, Z_TOP)), undefined);
 });
 
 test("rotating a half turn flips draw order and the visible faces", () => {

@@ -1,21 +1,24 @@
 /* START
  * Board generation: the playing surface and the pieces placed on it.
- * - PlacedPiece: a card on the board with a unique id, center coordinates in
- *   mm, and a z-index (0 = on the table).
+ * - PlacedPiece: a card on the board with a unique id, a z-index (0 = on the
+ *   table), and its mutable PieceState (center mm coordinates, rotation,
+ *   which face is up).
  * - Board: playing surface with mm dimensions.
  *   - place(card, xMm, yMm): validate the card and place it (its center) at
  *     the given coordinates; returns the PlacedPiece.
+ *   - piece(id): look up a placed piece.
+ *   - movePiece(id, xMm, yMm) / rotatePiece(id, rotationDeg): core piece
+ *     manipulation (clamped to the board / normalized); not routed through
+ *     Card handlers, so subclasses cannot override it.
  *   - centerX() / centerY(): the board's center coordinates in mm.
  *   - describe(): human-readable summary of the board for logs.
  * END */
 
-import { Card } from "../card/card.js";
+import { Card, normalizeDeg, PieceState } from "../card/card.js";
 
-export interface PlacedPiece {
+export interface PlacedPiece extends PieceState {
   id: number;
   card: Card;
-  xMm: number; // center of the piece
-  yMm: number;
   zIndex: number;
 }
 
@@ -38,8 +41,39 @@ export class Board {
     if (xMm < 0 || yMm < 0 || xMm > this.widthMm || yMm > this.heightMm) {
       throw new Error(`(${xMm}, ${yMm})mm is outside the ${this.widthMm}x${this.heightMm}mm board`);
     }
-    const piece: PlacedPiece = { id: this.nextId++, card, xMm, yMm, zIndex: 0 };
+    const piece: PlacedPiece = {
+      id: this.nextId++,
+      card,
+      xMm,
+      yMm,
+      zIndex: 0,
+      rotationDeg: 0,
+      faceUp: true,
+    };
     this.pieces.push(piece);
+    return piece;
+  }
+
+  piece(id: number): PlacedPiece | undefined {
+    return this.pieces.find((p) => p.id === id);
+  }
+
+  movePiece(id: number, xMm: number, yMm: number): PlacedPiece {
+    const piece = this.requirePiece(id);
+    piece.xMm = Math.min(this.widthMm, Math.max(0, xMm));
+    piece.yMm = Math.min(this.heightMm, Math.max(0, yMm));
+    return piece;
+  }
+
+  rotatePiece(id: number, rotationDeg: number): PlacedPiece {
+    const piece = this.requirePiece(id);
+    piece.rotationDeg = normalizeDeg(rotationDeg);
+    return piece;
+  }
+
+  private requirePiece(id: number): PlacedPiece {
+    const piece = this.piece(id);
+    if (!piece) throw new Error(`no piece with id ${id}`);
     return piece;
   }
 
