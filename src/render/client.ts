@@ -1,42 +1,47 @@
 /* START
- * Browser entry point: renders the board isometrically on the page's
- * <canvas id="board">, redrawing on window resize.
- * - main(): fetch /board.json, load each piece's front image, draw.
- * - fitCamera() / project(): fixed isometric camera (30 degree axes);
- *   world mm -> screen px, scaled so the whole board fits the canvas.
- * - drawScene() and helpers: board surface as a filled diamond, then each
- *   piece back-to-front as a box: two shaded side faces plus its front
- *   image mapped onto the top face with a canvas transform.
+ * Browser entry point: a thin shell over camera.ts + scene.ts. Fetches the
+ * board, loads face images, applies mouse input as pure camera mutations,
+ * and rasterizes the scene ops onto <canvas id="board">.
+ * - main(): fetch /board.json, preload images, wire controls, draw;
+ *   redraws on resize and on camera changes.
+ * - setupControls(): left-drag pans, mouse wheel zooms about the cursor,
+ *   right-drag left/right rotates the view around the screen center.
+ * - render() and helpers: clear to the table color, then draw each SceneOp
+ *   (polygon fill, or face image via a canvas transform).
  * END */
 
-import { BoardDto, PieceDto } from "./types.js";
-
-// Screen direction of the world axes: +x runs down-right, +y down-left, +z up.
-const COS = Math.cos(Math.PI / 6);
-const SIN = Math.sin(Math.PI / 6);
-const MARGIN_PX = 40;
+import { Camera, fitCamera, pan, rotateAbout, zoomAbout } from "./camera.js";
+import { buildScene, ImageOp, SceneOp } from "./scene.js";
+import { BoardDto } from "./types.js";
 
 const TABLE_COLOR = "#1e242b";
-const BOARD_COLOR = "#37654b";
-const SIDE_COLOR_X = "#b9b9b9"; // face towards +x
-const SIDE_COLOR_Y = "#9c9c9c"; // face towards +y
-
-interface Camera {
-  s: number; // screen px per world mm
-  offsetX: number;
-  offsetY: number;
-}
+const ZOOM_RATE = 0.001; // zoom factor exponent per wheel delta unit
+const ROTATE_RATE = 0.01; // radians of yaw per px of horizontal drag
 
 async function main(): Promise<void> {
   const board: BoardDto = await (await fetch("/board.json")).json();
-  const images = new Map<number, HTMLImageElement>();
+  const images = new Map<string, HTMLImageElement>();
   await Promise.all(
     board.pieces.map(async (piece) => {
-      images.set(piece.id, await loadImage(piece.frontUrl));
+      images.set(piece.frontUrl, await loadImage(piece.frontUrl));
     }),
   );
-  const draw = () => drawScene(board, images);
-  window.addEventListener("resize", draw);
+  const canvas = document.getElementById("board") as HTMLCanvasElement;
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  };
+  resize();
+  let cam = fitCamera(board, canvas.width, canvas.height);
+  const draw = () => render(canvas, buildScene(board, cam), images);
+  setupControls(canvas, (mutate) => {
+    cam = mutate(cam);
+    draw();
+  });
+  window.addEventListener("resize", () => {
+    resize();
+    draw();
+  });
   draw();
 }
 
@@ -49,93 +54,70 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function fitCamera(board: BoardDto, canvas: HTMLCanvasElement): Camera {
-  const isoW = (board.widthMm + board.heightMm) * COS;
-  const isoH = (board.widthMm + board.heightMm) * SIN;
-  const s = Math.min(
-    (canvas.width - 2 * MARGIN_PX) / isoW,
-    (canvas.height - 2 * MARGIN_PX) / isoH,
+function setupControls(
+  canvas: HTMLCanvasElement,
+  apply: (mutate: (cam: Camera) => Camera) => void,
+): void {
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  let dragging: "pan" | "rotate" | null = null;
+  let lastX = 0;
+  let lastY = 0;
+
+  canvas.addEventListener("mousedown", (e) => {
+    dragging = e.button === 0 ? "pan" : e.button === 2 ? "rotate" : null;
+    lastX = e.clientX;
+    lastY = e.clientY;
+  });
+  window.addEventListener("mouseup", () => {
+    dragging = null;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (dragging === "pan") {
+      apply((cam) => pan(cam, dx, dy));
+    } else {
+      apply((cam) => rotateAbout(cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE));
+    }
+  });
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      apply((cam) => zoomAbout(cam, e.clientX, e.clientY, Math.exp(-e.deltaY * ZOOM_RATE)));
+    },
+    { passive: false },
   );
-  return {
-    s,
-    offsetX: (canvas.width - (board.widthMm - board.heightMm) * COS * s) / 2,
-    offsetY: (canvas.height - isoH * s) / 2,
-  };
 }
 
-function project(cam: Camera, xMm: number, yMm: number, zMm: number): [number, number] {
-  return [
-    cam.offsetX + (xMm - yMm) * COS * cam.s,
-    cam.offsetY + (xMm + yMm) * SIN * cam.s - zMm * cam.s,
-  ];
-}
-
-function drawScene(board: BoardDto, images: Map<number, HTMLImageElement>): void {
-  const canvas = document.getElementById("board") as HTMLCanvasElement;
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
+function render(
+  canvas: HTMLCanvasElement,
+  ops: SceneOp[],
+  images: Map<string, HTMLImageElement>,
+): void {
   const ctx = canvas.getContext("2d")!;
-  const cam = fitCamera(board, canvas);
-
   ctx.fillStyle = TABLE_COLOR;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  fillPolygon(ctx, BOARD_COLOR, [
-    project(cam, 0, 0, 0),
-    project(cam, board.widthMm, 0, 0),
-    project(cam, board.widthMm, board.heightMm, 0),
-    project(cam, 0, board.heightMm, 0),
-  ]);
-
-  // Painter's algorithm: lower stacks first, then back-to-front.
-  const pieces = [...board.pieces].sort(
-    (a, b) => a.zIndex - b.zIndex || a.xMm + a.yMm - (b.xMm + b.yMm),
-  );
-  for (const piece of pieces) {
-    drawPiece(ctx, cam, piece, images.get(piece.id)!);
+  for (const op of ops) {
+    if (op.kind === "polygon") fillPolygon(ctx, op.color, op.points);
+    else drawImageOp(ctx, op, images.get(op.url)!);
   }
 }
 
-function drawPiece(
-  ctx: CanvasRenderingContext2D,
-  cam: Camera,
-  piece: PieceDto,
-  face: HTMLImageElement,
-): void {
-  const x0 = piece.xMm - piece.widthMm / 2;
-  const y0 = piece.yMm - piece.heightMm / 2;
-  const x1 = x0 + piece.widthMm;
-  const y1 = y0 + piece.heightMm;
-  const zBottom = piece.zIndex * piece.thicknessMm;
-  const zTop = zBottom + piece.thicknessMm;
-
-  // The two camera-facing side faces (towards +x and +y).
-  fillPolygon(ctx, SIDE_COLOR_X, [
-    project(cam, x1, y0, zTop),
-    project(cam, x1, y1, zTop),
-    project(cam, x1, y1, zBottom),
-    project(cam, x1, y0, zBottom),
-  ]);
-  fillPolygon(ctx, SIDE_COLOR_Y, [
-    project(cam, x0, y1, zTop),
-    project(cam, x1, y1, zTop),
-    project(cam, x1, y1, zBottom),
-    project(cam, x0, y1, zBottom),
-  ]);
-
-  // Top face: transform image pixel space onto the isometric plane.
-  const [ex, ey] = project(cam, x0, y0, zTop);
-  const mmPerPxX = piece.widthMm / face.width;
-  const mmPerPxY = piece.heightMm / face.height;
+function drawImageOp(ctx: CanvasRenderingContext2D, op: ImageOp, image: HTMLImageElement): void {
+  const [ex, ey] = op.origin;
   ctx.setTransform(
-    COS * cam.s * mmPerPxX,
-    SIN * cam.s * mmPerPxX,
-    -COS * cam.s * mmPerPxY,
-    SIN * cam.s * mmPerPxY,
+    (op.xCorner[0] - ex) / image.width,
+    (op.xCorner[1] - ey) / image.width,
+    (op.yCorner[0] - ex) / image.height,
+    (op.yCorner[1] - ey) / image.height,
     ex,
     ey,
   );
-  ctx.drawImage(face, 0, 0);
+  ctx.drawImage(image, 0, 0);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 

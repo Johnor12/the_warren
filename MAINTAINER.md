@@ -3,9 +3,9 @@
 A playtesting tool for board game prototyping: components are defined in
 TypeScript (object-oriented, with inheritance), composed into a board object,
 and (eventually) rendered and manipulated in a web UI. See `README.md` for
-the full product vision. Current state: component/image/board core plus a
-v0 isometric renderer (static scene served in the browser); no interaction
-or physics yet.
+the full product vision. Current state: component/image/board core plus an
+isometric renderer with camera controls (pan, zoom, rotate); no piece
+interaction or physics yet.
 
 ## Layout
 
@@ -17,8 +17,9 @@ or physics yet.
 - `src/board/` — the `Board` class: places validated cards at mm coordinates
   with z-indexes, producing the completed board object.
 - `src/render/` — the isometric renderer: `BoardDto` types, board
-  serialization for the server, and `client.ts`, the browser canvas
-  renderer (fixed camera, painter's algorithm).
+  serialization for the server, the pure camera model and scene builder
+  (unit tested), and `client.ts`, the browser shell mapping mouse input
+  to camera mutations and rasterizing the scene.
 - `src/server/` — the localhost web server (`startServer(board)`,
   `npm run serve`): serves the renderer page, the esbuild-bundled client,
   `/board.json`, and piece face PNGs.
@@ -34,6 +35,6 @@ Each directory has its own README.md (external API) and MAINTAINER.md
 - TypeScript (strict, `noEmit`), run directly with `tsx`.
 - ES modules (`"type": "module"`, NodeNext): relative imports must use the
   `.js` extension.
-- `npm run typecheck` / `npm run test-board` / `npm run serve`.
+- `npm run typecheck` / `npm test` / `npm run test-board` / `npm run serve`.
 - Runtime-relevant dependencies: `pngjs` (PNG encoding), `esbuild`
   (bundles the browser client at server startup).

@@ -6,6 +6,7 @@
   "description": "Lightweight playtesting tool for board game prototyping.",
   "scripts": {
     "serve": "tsx src/server/main.ts",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "test-board": "tsx boards/test-board.ts",
     "typecheck": "tsc --noEmit"
   },
