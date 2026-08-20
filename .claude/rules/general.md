@@ -9,3 +9,5 @@ Whenever working, read README.md and MAINTAINER.md at the root of the repo. You 
 Prefer systemic fixes when encountering parts of the system which weren't designed with the feature you're currently implementing in mind, rather than compromising clarity to fit the new feature into the existing system.
 
 Design the system in a way which facilitates automated testing by agents.
+
+Your goal when working should be to isolate the responsible service(s) and focus your work (and context) on them, treating other services as abstract APIs outside of the scope of your changes (only loading their README.mds into context, for example). The goal is to break the project into manageably sized services, allowing the project to scale with efficient context management (loading all project code into context on every change bloats quickly; loading a short <100 line README.md for each service scales much better).
