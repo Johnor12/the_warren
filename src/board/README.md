@@ -13,9 +13,10 @@ rotation and flipping affect only the one piece.
 ## API
 
 - `Board` — construct with `widthMm`/`heightMm`.
-  - `place(card, xMm, yMm)` validates the card and places its center at the
-    given coordinates (face up, unrotated), stacked on top of anything it
-    overlaps, returning a `PlacedPiece`.
+  - `place(component, xMm, yMm)` validates the component (a `Card` or
+    `GameObject`) and places its center at the given coordinates (face up,
+    unrotated), stacked on top of anything it overlaps, returning a
+    `PlacedPiece`.
   - `piece(id)` looks up a placed piece.
   - `movePiece(id, xMm, yMm)` — moves the piece (clamped to the board) and
     everything stacked on top of it by the same delta, then re-resolves
@@ -23,11 +24,12 @@ rotation and flipping affect only the one piece.
     or re-bases to z 0 on empty board.
   - `rotatePiece(id, rotationDeg)` — rotates one piece (normalized to
     [0, 360)); never restacks. Neither move nor rotate is routed through
-    Card handlers, so subclasses cannot override them.
+    Component handlers, so subclasses cannot override them.
   - `centerX()`/`centerY()` give the board center; `describe()` returns a
     log-friendly summary.
-- `PlacedPiece` — `{ id, card, zIndex, outlineMm }` plus the mutable
-  `PieceState` (`xMm`, `yMm`, `rotationDeg`, `faceUp`).
+- `PlacedPiece` — `{ id, component, zIndex, outlineMm, thicknessMm }` plus
+  the mutable `PieceState` (`xMm`, `yMm`, `rotationDeg`, `faceUp`).
 - `stacking.ts` — the pure stacking rules (`piecesOverlap`, `carriedStack`,
-  `restingZ`, `resolveZ`) over a minimal `StackPiece` shape; browser-safe,
-  also used by the renderer client for drag previews.
+  `restingZ`, `resolveZ`, plus `stackBottoms` for physical heights when
+  thicknesses vary) over a minimal `StackPiece` shape; browser-safe, also
+  used by the renderer.

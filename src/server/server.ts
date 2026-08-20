@@ -8,9 +8,9 @@
  *   /board.json (serialized board), /pieces/<id>/<face>.png (face images),
  *   and POST /pieces/<id>/<action> piece interactions.
  * - handlePieceAction(): applies one interaction: move/rotate via the
- *   Board's core methods, double-click/double-right-click via the card's
- *   overridable handlers; responds with every piece's updated state
- *   (a move can restack pieces beyond the moved one).
+ *   Board's core methods, double-click/double-right-click via the
+ *   component's overridable handlers; responds with every piece's updated
+ *   state (a move can restack pieces beyond the moved one).
  * END */
 
 import http from "node:http";
@@ -81,8 +81,8 @@ async function handlePieceAction(
   const body = (await readJson(req)) as Record<string, unknown>;
   if (action === "move") board.movePiece(id, num(body.xMm), num(body.yMm));
   else if (action === "rotate") board.rotatePiece(id, num(body.rotationDeg));
-  else if (action === "double-click") piece.card.onDoubleClick(piece);
-  else piece.card.onDoubleRightClick(piece);
+  else if (action === "double-click") piece.component.onDoubleClick(piece);
+  else piece.component.onDoubleRightClick(piece);
   respond(res, 200, "application/json", JSON.stringify(pieceUpdatesToDto(board)));
 }
 

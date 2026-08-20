@@ -1,17 +1,26 @@
 /* START
  * Unit tests for stacking.ts: rotated footprints, overlap between pieces,
- * carried-stack membership (transitive, above only), restingZ, and resolveZ
- * (arrival order, re-basing, moved stack landing on top).
+ * carried-stack membership (transitive, above only), restingZ, resolveZ
+ * (arrival order, re-basing, moved stack landing on top), and stackBottoms
+ * (physical heights with mixed thicknesses).
  * END */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rectangleOutline } from "../card/card.js";
-import { carriedStack, footprint, piecesOverlap, resolveZ, restingZ, StackPiece } from "./stacking.js";
+import { rectangleOutline } from "../component/component.js";
+import {
+  carriedStack,
+  footprint,
+  piecesOverlap,
+  resolveZ,
+  restingZ,
+  stackBottoms,
+  StackPiece,
+} from "./stacking.js";
 
 // A 10x10mm square piece at (x, y).
-function square(xMm: number, yMm: number, zIndex = 0, rotationDeg = 0): StackPiece {
-  return { xMm, yMm, rotationDeg, zIndex, outlineMm: rectangleOutline(10, 10) };
+function square(xMm: number, yMm: number, zIndex = 0, rotationDeg = 0, thicknessMm = 1): StackPiece {
+  return { xMm, yMm, rotationDeg, zIndex, outlineMm: rectangleOutline(10, 10), thicknessMm };
 }
 
 test("footprint rotates the outline about the piece center", () => {
@@ -21,6 +30,7 @@ test("footprint rotates the outline about the piece center", () => {
     rotationDeg: 90,
     zIndex: 0,
     outlineMm: rectangleOutline(10, 20),
+    thicknessMm: 1,
   };
   // Local (-5, -10) rotates to (10, -5), so the corner lands at (110, 45).
   const [x, y] = footprint(piece)[0];
@@ -86,4 +96,24 @@ test("resolveZ keeps settled arrival order and leaves disjoint stacks alone", ()
     [a.zIndex, b.zIndex, far.zIndex, moved.zIndex],
     [0, 1, 0, 0],
   );
+});
+
+test("stackBottoms accumulates the thicknesses below each piece", () => {
+  const cube = square(0, 0, 0, 0, 8);
+  const card = square(4, 0, 1, 0, 0.3); // resting on the cube
+  const topCard = square(4, 0, 2, 0, 0.3);
+  const lone = square(50, 0, 0, 0, 0.3);
+  const bottoms = stackBottoms([cube, card, topCard, lone]);
+  assert.deepEqual(
+    [bottoms.get(cube), bottoms.get(card), bottoms.get(topCard), bottoms.get(lone)],
+    [0, 8, 8.3, 0],
+  );
+});
+
+test("stackBottoms rests a bridging piece on the tallest support", () => {
+  const shortCube = square(0, 0, 0, 0, 4);
+  const tallCube = square(10, 0, 0, 0, 8);
+  const bridge = square(5, 0, 1, 0, 0.3); // overlaps both cubes
+  const bottoms = stackBottoms([shortCube, tallCube, bridge]);
+  assert.equal(bottoms.get(bridge), 8);
 });

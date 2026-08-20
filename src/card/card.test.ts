@@ -1,16 +1,16 @@
 /* START
- * Unit tests for the Card interaction handlers: the default double-click
- * flip, the default double-right-click 45° snap rotation (advance from a
- * stop, align to the nearest stop from between stops, wrap at 360°), and
- * that subclasses can override both handlers. Also assertValid outline
- * checks (out-of-bounds rejection) and the shape-mapping invariant (face
- * bitmaps opaque only inside the outline).
+ * Unit tests for Card: the default double-click flip, that subclasses can
+ * override the interaction handlers, and assertValid outline checks
+ * (out-of-bounds rejection) and the shape-mapping invariant (face bitmaps
+ * opaque only inside the outline). The inherited 45° snap rotation is
+ * tested in src/component/component.test.ts.
  * END */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { hexagonOutline, Outline, PieceState } from "../component/component.js";
 import { polygonImage, solidImage } from "../image/create.js";
-import { Card, hexagonOutline, Outline, PieceState } from "./card.js";
+import { Card } from "./card.js";
 
 const RED = { r: 200, g: 60, b: 60, a: 255 };
 const BLUE = { r: 60, g: 60, b: 200, a: 255 };
@@ -35,30 +35,8 @@ test("double click flips the card over and back", () => {
   assert.equal(piece.faceUp, true);
 });
 
-test("double right click rotates 45° from a stop", () => {
-  const card = new PlainCard();
-  for (const [from, to] of [
-    [0, 45],
-    [45, 90],
-    [315, 0], // wraps around
-  ]) {
-    const piece = pieceAt(from);
-    card.onDoubleRightClick(piece);
-    assert.equal(piece.rotationDeg, to, `from ${from}°`);
-  }
-});
-
-test("double right click between stops aligns with the nearest stop", () => {
-  const card = new PlainCard();
-  for (const [from, to] of [
-    [30, 45],
-    [100, 90],
-    [350, 0], // nearest stop is 360°, normalized to 0°
-  ]) {
-    const piece = pieceAt(from);
-    card.onDoubleRightClick(piece);
-    assert.equal(piece.rotationDeg, to, `from ${from}°`);
-  }
+test("cards have the fixed 0.3mm thickness", () => {
+  assert.equal(new PlainCard().thicknessMm, 0.3);
 });
 
 class HexCard extends PlainCard {

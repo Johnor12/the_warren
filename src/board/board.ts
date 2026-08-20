@@ -1,32 +1,33 @@
 /* START
  * Board generation: the playing surface and the pieces placed on it.
- * - PlacedPiece: a card on the board with a unique id, a z-index (0 = on the
- *   table), its cached outline, and its mutable PieceState (center mm
- *   coordinates, rotation, which face is up).
+ * - PlacedPiece: a component on the board with a unique id, a z-index (0 =
+ *   on the table), its cached outline and thickness, and its mutable
+ *   PieceState (center mm coordinates, rotation, which face is up).
  * - Board: playing surface with mm dimensions.
- *   - place(card, xMm, yMm): validate the card and place it (its center) at
- *     the given coordinates, stacking on top of anything it overlaps;
- *     returns the PlacedPiece.
+ *   - place(component, xMm, yMm): validate the component (Card or
+ *     GameObject) and place it (its center) at the given coordinates,
+ *     stacking on top of anything it overlaps; returns the PlacedPiece.
  *   - piece(id): look up a placed piece.
  *   - movePiece(id, xMm, yMm): move the piece (clamped to the board) and
  *     everything stacked on top of it, then re-resolve z-indexes so the
  *     moved stack lands on top of whatever it now overlaps.
  *   - rotatePiece(id, rotationDeg): rotate one piece (normalized angle);
  *     rotation never restacks. Neither move nor rotate is routed through
- *     Card handlers, so subclasses cannot override them.
+ *     Component handlers, so subclasses cannot override them.
  *   - centerX() / centerY(): the board's center coordinates in mm.
  *   - describe(): human-readable summary of the board for logs.
  * END */
 
-import { Card, normalizeDeg, PieceState } from "../card/card.js";
+import { Component, normalizeDeg, PieceState } from "../component/component.js";
 import { Polygon } from "../geometry/polygon.js";
 import { carriedStack, resolveZ, restingZ } from "./stacking.js";
 
 export interface PlacedPiece extends PieceState {
   id: number;
-  card: Card;
+  component: Component;
   zIndex: number;
-  outlineMm: Polygon; // cached card.outlineMm(), for stacking overlap checks
+  outlineMm: Polygon; // cached component.outlineMm(), for stacking overlap checks
+  thicknessMm: number; // cached component.thicknessMm, for stack heights
 }
 
 export class Board {
@@ -43,20 +44,21 @@ export class Board {
     this.heightMm = heightMm;
   }
 
-  place(card: Card, xMm: number, yMm: number): PlacedPiece {
-    card.assertValid();
+  place(component: Component, xMm: number, yMm: number): PlacedPiece {
+    component.assertValid();
     if (xMm < 0 || yMm < 0 || xMm > this.widthMm || yMm > this.heightMm) {
       throw new Error(`(${xMm}, ${yMm})mm is outside the ${this.widthMm}x${this.heightMm}mm board`);
     }
     const piece: PlacedPiece = {
       id: this.nextId++,
-      card,
+      component,
       xMm,
       yMm,
       zIndex: 0,
       rotationDeg: 0,
       faceUp: true,
-      outlineMm: card.outlineMm(),
+      outlineMm: component.outlineMm(),
+      thicknessMm: component.thicknessMm,
     };
     piece.zIndex = restingZ(piece, this.pieces);
     this.pieces.push(piece);
@@ -105,9 +107,13 @@ export class Board {
   describe(): string {
     const lines = [`Board ${this.widthMm}x${this.heightMm}mm, ${this.pieces.length} piece(s):`];
     for (const piece of this.pieces) {
+      const xs = piece.outlineMm.map(([x]) => x);
+      const ys = piece.outlineMm.map(([, y]) => y);
+      const w = Math.max(...xs) - Math.min(...xs);
+      const h = Math.max(...ys) - Math.min(...ys);
       lines.push(
-        `  #${piece.id} ${piece.card.constructor.name} ` +
-          `(${piece.card.widthMm}x${piece.card.heightMm}mm) ` +
+        `  #${piece.id} ${piece.component.constructor.name} ` +
+          `(${w}x${h}x${piece.thicknessMm}mm) ` +
           `at (${piece.xMm}, ${piece.yMm})mm, z=${piece.zIndex}`,
       );
     }

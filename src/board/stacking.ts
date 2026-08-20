@@ -14,6 +14,9 @@
  * - resolveZ(pieces, moved): reassign every z-index bottom-up after a move;
  *   settled pieces keep their relative order, the moved stack arrives last
  *   so it lands on top of whatever it now overlaps.
+ * - stackBottoms(pieces): each piece's physical bottom height in mm (piece
+ *   thicknesses vary — a card resting on an 8mm cube sits at 8mm), for
+ *   rendering and hit testing.
  * END */
 
 import { Polygon, polygonsOverlap } from "../geometry/polygon.js";
@@ -26,6 +29,7 @@ export interface StackPiece {
   rotationDeg: number;
   zIndex: number;
   outlineMm: Polygon;
+  thicknessMm: number;
 }
 
 // The piece's outline in world coordinates (rotated about its center,
@@ -80,4 +84,23 @@ export function resolveZ(pieces: StackPiece[], moved: StackPiece[]): void {
     piece.zIndex = restingZ(piece, placed);
     placed.push(piece);
   }
+}
+
+// Each piece's physical bottom height: resting on the tallest top among the
+// overlapped pieces below it (by z-index), or 0 on the board. z-indexes stay
+// the stacking model; heights only matter for rendering and hit testing.
+export function stackBottoms<T extends StackPiece>(pieces: T[]): Map<T, number> {
+  const sorted = [...pieces].sort((a, b) => a.zIndex - b.zIndex);
+  const bottoms = new Map<T, number>();
+  for (const piece of sorted) {
+    let bottom = 0;
+    for (const other of sorted) {
+      if (other.zIndex >= piece.zIndex) break;
+      if (piecesOverlap(piece, other)) {
+        bottom = Math.max(bottom, bottoms.get(other)! + other.thicknessMm);
+      }
+    }
+    bottoms.set(piece, bottom);
+  }
+  return bottoms;
 }

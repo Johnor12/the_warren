@@ -1,16 +1,19 @@
 /* START
  * Browser entry point: a thin shell over camera.ts + scene.ts. Fetches the
- * board, loads face images, applies mouse input, and rasterizes the scene
- * ops onto <canvas id="board">.
+ * board, loads face images (cards only; objects render as colored
+ * polygons), applies mouse input, and rasterizes the scene ops onto
+ * <canvas id="board">.
  * - main(): fetch /board.json, preload images, wire controls, draw;
  *   redraws on resize and on camera/piece changes.
- * - setupControls(): the gesture state machine. On a piece: left-drag moves
- *   it plus everything stacked on top of it (the stack lifts above the board
- *   while moving, floating over anything it passes), right-drag rotates just
- *   that piece, double click / double right click POST to the server, which
- *   runs the card's overridable handlers (flip / snap-rotate 45°). Clicks
- *   always hit the topmost piece under the cursor. On empty board: left-drag
- *   pans, right-drag rotates the view, mouse wheel zooms about the cursor.
+ * - setupControls(): the gesture state machine. On a piece (its whole 3D
+ *   body is clickable): left-drag moves it plus everything stacked on top
+ *   of it — a height-aware drag (scene.ts resolveDrag), the stack floating
+ *   LIFT_MM above whatever it would land on, so it drops where it appears
+ *   to be; right-drag rotates just that piece, double click / double right
+ *   click POST to the server, which runs the component's overridable
+ *   handlers (cards flip / snap-rotate 45°). Clicks always hit the topmost
+ *   piece under the cursor. On empty board: left-drag pans, right-drag
+ *   rotates the view, mouse wheel zooms about the cursor.
  *   Drag results are committed to the server on mouseup; the server responds
  *   with every piece's state (moves restack z-indexes), applied wholesale.
  * - render() and helpers: clear to the table color, then draw each SceneOp
@@ -19,7 +22,15 @@
 
 import { carriedStack } from "../board/stacking.js";
 import { Camera, fitCamera, pan, rotateAbout, unproject, zoomAbout } from "./camera.js";
-import { buildScene, ImageOp, Lift, pickPiece, pieceTopMm, SceneOp } from "./scene.js";
+import {
+  buildScene,
+  ImageOp,
+  Lift,
+  pickPiece,
+  pieceTopMm,
+  resolveDrag,
+  SceneOp,
+} from "./scene.js";
 import { BoardDto, PieceDto, PieceUpdateDto } from "./types.js";
 
 const TABLE_COLOR = "#1e242b";
@@ -43,7 +54,7 @@ async function main(): Promise<void> {
   const images = new Map<string, HTMLImageElement>();
   await Promise.all(
     board.pieces
-      .flatMap((piece) => [piece.frontUrl, piece.backUrl])
+      .flatMap((piece) => (piece.kind === "card" ? [piece.frontUrl, piece.backUrl] : []))
       .map(async (url) => {
         images.set(url, await loadImage(url));
       }),
@@ -93,7 +104,14 @@ interface StackEntry {
 type Gesture =
   | { kind: "pan" }
   | { kind: "orbit" }
-  | { kind: "move"; piece: PieceDto; stack: StackEntry[]; grabXMm: number; grabYMm: number }
+  | {
+      kind: "move";
+      piece: PieceDto;
+      stack: StackEntry[];
+      grabXMm: number;
+      grabYMm: number;
+      supportMm: number; // height the piece would rest on, from resolveDrag
+    }
   | { kind: "spin"; piece: PieceDto };
 
 function setupControls(ctx: Ctx): void {
@@ -118,13 +136,21 @@ function setupControls(ctx: Ctx): void {
     if (!piece) {
       gesture = { kind: button === 0 ? "pan" : "orbit" };
     } else if (button === 0) {
-      const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(piece));
+      const topMm = pieceTopMm(ctx.board.pieces, piece);
+      const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, topMm);
       const stack = carriedStack(ctx.board.pieces, piece).map((p) => ({
         piece: p,
         dxMm: p.xMm - piece.xMm,
         dyMm: p.yMm - piece.yMm,
       }));
-      gesture = { kind: "move", piece, stack, grabXMm: wx - piece.xMm, grabYMm: wy - piece.yMm };
+      gesture = {
+        kind: "move",
+        piece,
+        stack,
+        grabXMm: wx - piece.xMm,
+        grabYMm: wy - piece.yMm,
+        supportMm: topMm - piece.thicknessMm,
+      };
     } else {
       gesture = { kind: "spin", piece };
     }
@@ -140,7 +166,10 @@ function setupControls(ctx: Ctx): void {
       if (Math.hypot(e.clientX - startX, e.clientY - startY) < CLICK_PX) return;
       dragging = true;
       if (gesture.kind === "move") {
-        ctx.lift = { pieceIds: gesture.stack.map((s) => s.piece.id), liftMm: LIFT_MM };
+        ctx.lift = {
+          pieceIds: gesture.stack.map((s) => s.piece.id),
+          bottomMm: gesture.supportMm + LIFT_MM,
+        };
       }
     }
     if (gesture.kind === "pan") {
@@ -148,16 +177,26 @@ function setupControls(ctx: Ctx): void {
     } else if (gesture.kind === "orbit") {
       ctx.cam = rotateAbout(ctx.cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE);
     } else if (gesture.kind === "move") {
-      // The cursor drags the piece's footprint; the lift is visual only.
-      // Carried pieces follow at their original offsets (only the grabbed
-      // piece is clamped to the board, matching the server).
-      const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(gesture.piece));
-      const xMm = clamp(wx - gesture.grabXMm, 0, ctx.board.widthMm);
-      const yMm = clamp(wy - gesture.grabYMm, 0, ctx.board.heightMm);
-      for (const { piece, dxMm, dyMm } of gesture.stack) {
-        piece.xMm = xMm + dxMm;
-        piece.yMm = yMm + dyMm;
+      // Height-aware drag: the cursor is read against whatever the stack
+      // would rest on, so it lands where it appears to be. The lift floats
+      // it LIFT_MM above that support. Carried pieces follow at their
+      // original offsets (only the grabbed piece is clamped to the board,
+      // matching the server); over an inconsistent sliver resolveDrag
+      // returns undefined and the stack keeps its last position.
+      const res = resolveDrag(ctx.board, ctx.cam, e.clientX, e.clientY, {
+        piece: gesture.piece,
+        carriedIds: gesture.stack.map((s) => s.piece.id),
+        grabXMm: gesture.grabXMm,
+        grabYMm: gesture.grabYMm,
+      });
+      if (res) {
+        gesture.supportMm = res.supportMm;
+        for (const { piece, dxMm, dyMm } of gesture.stack) {
+          piece.xMm = res.xMm + dxMm;
+          piece.yMm = res.yMm + dyMm;
+        }
       }
+      if (ctx.lift) ctx.lift.bottomMm = gesture.supportMm + LIFT_MM;
     } else {
       gesture.piece.rotationDeg += dx * SPIN_RATE;
     }
@@ -219,10 +258,6 @@ function setupControls(ctx: Ctx): void {
     }
     draw(ctx);
   }
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 function render(

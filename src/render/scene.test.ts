@@ -5,18 +5,24 @@
  * scaled points, flipped draw order and side faces. Also covers piece
  * state rendering (rotation, face-down, lift), stacks (bottom-up draw
  * order, a lifted piece floating over a tall stack, topmost-piece picking),
- * pickPiece hit testing, and non-rectangular outlines (hexagon sides,
- * image clip, hit testing).
+ * pickPiece hit testing (full-silhouette: side faces of 3D bodies are
+ * clickable), non-rectangular outlines (hexagon sides, image clip, hit
+ * testing), 3D objects (prism side/top polygons with shaded colors,
+ * physical heights when cards stack on cubes), and resolveDrag (the
+ * height-aware drag: stays on a support while overlapping, reads the board
+ * plane when clear, undefined over inconsistent slivers).
  * END */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Board } from "../board/board.js";
-import { Card, hexagonOutline, Outline } from "../card/card.js";
+import { Card } from "../card/card.js";
+import { hexagonOutline, Outline } from "../component/component.js";
 import { polygonImage, solidImage } from "../image/create.js";
 import { Image } from "../image/image.js";
+import { GameObject, Prism } from "../object/object.js";
 import { Camera, fitCamera, pan, project, rotateAbout, zoomAbout } from "./camera.js";
-import { buildScene, ImageOp, pickPiece, SceneOp } from "./scene.js";
+import { buildScene, ImageOp, pickPiece, PolygonOp, resolveDrag, SceneOp } from "./scene.js";
 import { boardToDto } from "./serialize.js";
 import { BoardDto } from "./types.js";
 
@@ -115,8 +121,8 @@ test("a face-down piece renders its back image", () => {
   );
 });
 
-test("a lifted piece rises by liftMm and is drawn on top", () => {
-  const ops = buildScene(BOARD, CAM, { pieceIds: [1], liftMm: 20 });
+test("a lifted piece floats at the lift's base height and is drawn on top", () => {
+  const ops = buildScene(BOARD, CAM, { pieceIds: [1], bottomMm: 20 });
   assert.deepEqual(
     imageOps(ops).map((op) => op.url),
     ["/pieces/2/front.png", "/pieces/1/front.png"],
@@ -151,10 +157,10 @@ test("a piece dragged past a tall stack floats over it, never through it", () =>
   // Piece 11 (z 0) dragged directly over the 10-piece stack.
   board.pieces[10].xMm = 50;
   board.pieces[10].yMm = 50;
-  const ops = buildScene(board, CAM, { pieceIds: [11], liftMm: 20 });
+  const ops = buildScene(board, CAM, { pieceIds: [11], bottomMm: 20 });
   const urls = imageOps(ops).map((op) => op.url);
   // Painted after every stack piece (over it), and physically above the
-  // stack's 3mm top: lifted to 20mm.
+  // stack's 3mm top: floating at 20mm.
   assert.equal(urls[10], "/pieces/11/front.png");
   assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 20 + 0.3));
 });
@@ -235,4 +241,136 @@ test("pickPiece tests against the hexagonal outline, not the bounding box", () =
   assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, Z_TOP))?.id, 1);
   // Inside the bounding box but outside the hexagon's top-left slope.
   assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 10, Z_TOP)), undefined);
+});
+
+const CUBE_COLOR = { r: 100, g: 150, b: 200, a: 255 };
+
+// A 200x100mm board with an 8mm cube at (50, 50).
+function makeCubeBoard(): BoardDto {
+  const board = new Board(200, 100);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  return boardToDto(board);
+}
+
+function polygonOps(ops: SceneOp[]): PolygonOp[] {
+  return ops.filter((op) => op.kind === "polygon");
+}
+
+test("a cube renders two shaded sides and a colored top face", () => {
+  const ops = buildScene(makeCubeBoard(), CAM);
+  // Board polygon + 2 camera-facing sides + the top face; no image ops.
+  assert.equal(ops.length, 4);
+  assert.ok(ops.every((op) => op.kind === "polygon"));
+  const [, sideX, sideY, top] = polygonOps(ops);
+  assert.equal(sideX.color, "rgb(80, 120, 160)"); // color * 0.8
+  assert.equal(sideY.color, "rgb(65, 98, 130)"); // color * 0.65
+  assert.equal(top.color, "rgb(100, 150, 200)");
+  // The top face spans the cube's 8x8mm footprint at its 8mm height.
+  assertClose(top.points[0], project(CAM, 46, 46, 8));
+  assertClose(top.points[2], project(CAM, 54, 54, 8));
+  // The +x side runs from the top edge down to the board.
+  assertClose(sideX.points[0], project(CAM, 54, 46, 8));
+  assertClose(sideX.points[2], project(CAM, 54, 54, 0));
+});
+
+test("a multi-prism object draws its prisms bottom-up", () => {
+  class Tower extends GameObject {
+    constructor() {
+      super({ heightMm: 16, color: CUBE_COLOR });
+    }
+
+    override shapeMm(): Prism[] {
+      const cap: Outline = [
+        [-2, -2],
+        [2, -2],
+        [2, 2],
+        [-2, 2],
+      ];
+      return [
+        { outlineMm: this.outlineMm(), bottomMm: 0, topMm: 8 },
+        { outlineMm: cap, bottomMm: 8, topMm: 16 },
+      ];
+    }
+  }
+  const board = new Board(200, 100);
+  board.place(new Tower(), 50, 50);
+  const ops = buildScene(boardToDto(board), CAM);
+  // Board + (2 sides + top) per prism.
+  assert.equal(ops.length, 7);
+  const tops = polygonOps(ops).filter((op) => op.color === "rgb(100, 150, 200)");
+  assertClose(tops[0].points[0], project(CAM, 46, 46, 8));
+  assertClose(tops[1].points[0], project(CAM, 48, 48, 16));
+});
+
+test("a card stacked on a cube renders and picks at the cube's height", () => {
+  const board = new Board(200, 100);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  board.place(new TestCard(), 50, 50);
+  const dto = boardToDto(board);
+  const ops = buildScene(dto, CAM);
+  // The card's face sits on top of the 8mm cube, not at card height.
+  assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 8 + 0.3));
+  assert.equal(pickPiece(dto, CAM, ...project(CAM, 50, 50, 8 + 0.3))?.id, 2);
+});
+
+test("pickPiece hits a piece's side faces, not just its top", () => {
+  const board = makeCubeBoard();
+  // Points on the cube's +x and +y side faces at mid-height.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, 4))?.id, 1);
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 50, 54, 4))?.id, 1);
+  // In the air above the cube's top face: nothing.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 50, 50, 20)), undefined);
+});
+
+// A 200x100mm board with cube 1 at (50, 50) and cube 2 stacked on it.
+function makeCubeStackBoard(): BoardDto {
+  const board = new Board(200, 100);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  return boardToDto(board);
+}
+
+test("pickPiece on a stacked cube's side picks that cube", () => {
+  const board = makeCubeStackBoard();
+  // The +x side faces of the top (z 8..16) and bottom (z 0..8) cubes.
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, 12))?.id, 2);
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, 4))?.id, 1);
+});
+
+// Dragging the stacked top cube, grabbed at its top-face center.
+function dragTopCube(board: BoardDto) {
+  return { piece: board.pieces[1], carriedIds: [2], grabXMm: 0, grabYMm: 0 };
+}
+
+test("resolveDrag keeps a cube dragged partway down another cube on top of it", () => {
+  const board = makeCubeStackBoard();
+  // The cursor over the bottom cube: read on its 8mm top, still overlapping.
+  const res = resolveDrag(board, CAM, ...project(CAM, 53, 53, 16), dragTopCube(board));
+  assert.equal(res?.supportMm, 8);
+  assertClose([res!.xMm, res!.yMm], [53, 53]);
+});
+
+test("resolveDrag reads the cursor on the board plane once the footprint is clear", () => {
+  const board = makeCubeStackBoard();
+  const res = resolveDrag(board, CAM, ...project(CAM, 70, 70, 16), dragTopCube(board));
+  // The same screen point on the 8mm-lower plane sits 8mm further in view
+  // direction: the piece lands where it appears, never inside the cube.
+  assert.equal(res?.supportMm, 0);
+  assertClose([res!.xMm, res!.yMm], [62, 62]);
+});
+
+test("resolveDrag is undefined over a physically inconsistent sliver", () => {
+  const board = makeCubeStackBoard();
+  // Past the cube's edge on its top plane, but overlapping it on the board
+  // plane: no consistent resting spot — the caller keeps the last position.
+  assert.equal(resolveDrag(board, CAM, ...project(CAM, 59, 59, 16), dragTopCube(board)), undefined);
+});
+
+test("a lifted stack keeps its inner heights above the lift base", () => {
+  const board = new Board(200, 100);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  board.place(new TestCard(), 50, 50);
+  const ops = buildScene(boardToDto(board), CAM, { pieceIds: [1, 2], bottomMm: 20 });
+  // The carried card rides on the floating cube: 20 + 8mm up.
+  assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 20 + 8 + 0.3));
 });

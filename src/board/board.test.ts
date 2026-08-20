@@ -10,6 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Card } from "../card/card.js";
 import { solidImage } from "../image/create.js";
+import { GameObject } from "../object/object.js";
 import { Board } from "./board.js";
 
 class PlainCard extends Card {
@@ -118,6 +119,20 @@ test("pulling the top card off a stack rests it on the board", () => {
   board.place(new PlainCard(), 50, 50);
   board.movePiece(2, 150, 50);
   assert.deepEqual(zOf(board, 1, 2), [0, 0]);
+});
+
+test("objects stack with cards under the same rules", () => {
+  const board = new Board(200, 100);
+  board.place(new GameObject(), 50, 50); // 8mm cube, z 0
+  board.place(new PlainCard(), 52, 50); // overlaps the cube -> z 1
+  const cube = board.place(new GameObject(), 150, 50);
+  board.movePiece(cube.id, 50, 50); // dropped onto the stack -> z 2
+  assert.deepEqual(zOf(board, 1, 2, 3), [0, 1, 2]);
+  // Thicknesses are cached per piece for physical stack heights.
+  assert.deepEqual(
+    board.pieces.map((p) => p.thicknessMm),
+    [8, 0.3, 8],
+  );
 });
 
 test("rotating and flipping never restack", () => {
