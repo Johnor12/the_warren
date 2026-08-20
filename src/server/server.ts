@@ -9,7 +9,8 @@
  *   and POST /pieces/<id>/<action> piece interactions.
  * - handlePieceAction(): applies one interaction: move/rotate via the
  *   Board's core methods, double-click/double-right-click via the card's
- *   overridable handlers; responds with the updated piece state.
+ *   overridable handlers; responds with every piece's updated state
+ *   (a move can restack pieces beyond the moved one).
  * END */
 
 import http from "node:http";
@@ -17,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { buildSync } from "esbuild";
 import { Board } from "../board/board.js";
 import { encodeImageAsPng } from "../image/png.js";
-import { boardToDto, pieceFaceImage, pieceStateToDto } from "../render/serialize.js";
+import { boardToDto, pieceFaceImage, pieceUpdatesToDto } from "../render/serialize.js";
 
 export const DEFAULT_PORT = 3000;
 
@@ -82,7 +83,7 @@ async function handlePieceAction(
   else if (action === "rotate") board.rotatePiece(id, num(body.rotationDeg));
   else if (action === "double-click") piece.card.onDoubleClick(piece);
   else piece.card.onDoubleRightClick(piece);
-  respond(res, 200, "application/json", JSON.stringify(pieceStateToDto(piece)));
+  respond(res, 200, "application/json", JSON.stringify(pieceUpdatesToDto(board)));
 }
 
 function readJson(req: http.IncomingMessage): Promise<unknown> {

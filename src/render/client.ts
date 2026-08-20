@@ -5,18 +5,22 @@
  * - main(): fetch /board.json, preload images, wire controls, draw;
  *   redraws on resize and on camera/piece changes.
  * - setupControls(): the gesture state machine. On a piece: left-drag moves
- *   it (lifted above the board while moving), right-drag rotates it, double
- *   click / double right click POST to the server, which runs the card's
- *   overridable handlers (flip / snap-rotate 45°). On empty board: left-drag
+ *   it plus everything stacked on top of it (the stack lifts above the board
+ *   while moving, floating over anything it passes), right-drag rotates just
+ *   that piece, double click / double right click POST to the server, which
+ *   runs the card's overridable handlers (flip / snap-rotate 45°). Clicks
+ *   always hit the topmost piece under the cursor. On empty board: left-drag
  *   pans, right-drag rotates the view, mouse wheel zooms about the cursor.
- *   Drag results are committed to the server on mouseup.
+ *   Drag results are committed to the server on mouseup; the server responds
+ *   with every piece's state (moves restack z-indexes), applied wholesale.
  * - render() and helpers: clear to the table color, then draw each SceneOp
  *   (polygon fill, or face image via a canvas transform).
  * END */
 
+import { carriedStack } from "../board/stacking.js";
 import { Camera, fitCamera, pan, rotateAbout, unproject, zoomAbout } from "./camera.js";
 import { buildScene, ImageOp, Lift, pickPiece, pieceTopMm, SceneOp } from "./scene.js";
-import { BoardDto, PieceDto, PieceStateDto } from "./types.js";
+import { BoardDto, PieceDto, PieceUpdateDto } from "./types.js";
 
 const TABLE_COLOR = "#1e242b";
 const ZOOM_RATE = 0.001; // zoom factor exponent per wheel delta unit
@@ -78,10 +82,18 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
+// A dragged piece carries everything stacked on top of it; each carried
+// piece keeps its mm offset from the dragged (base) piece.
+interface StackEntry {
+  piece: PieceDto;
+  dxMm: number;
+  dyMm: number;
+}
+
 type Gesture =
   | { kind: "pan" }
   | { kind: "orbit" }
-  | { kind: "move"; piece: PieceDto; grabXMm: number; grabYMm: number }
+  | { kind: "move"; piece: PieceDto; stack: StackEntry[]; grabXMm: number; grabYMm: number }
   | { kind: "spin"; piece: PieceDto };
 
 function setupControls(ctx: Ctx): void {
@@ -107,7 +119,12 @@ function setupControls(ctx: Ctx): void {
       gesture = { kind: button === 0 ? "pan" : "orbit" };
     } else if (button === 0) {
       const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(piece));
-      gesture = { kind: "move", piece, grabXMm: wx - piece.xMm, grabYMm: wy - piece.yMm };
+      const stack = carriedStack(ctx.board.pieces, piece).map((p) => ({
+        piece: p,
+        dxMm: p.xMm - piece.xMm,
+        dyMm: p.yMm - piece.yMm,
+      }));
+      gesture = { kind: "move", piece, stack, grabXMm: wx - piece.xMm, grabYMm: wy - piece.yMm };
     } else {
       gesture = { kind: "spin", piece };
     }
@@ -123,7 +140,7 @@ function setupControls(ctx: Ctx): void {
       if (Math.hypot(e.clientX - startX, e.clientY - startY) < CLICK_PX) return;
       dragging = true;
       if (gesture.kind === "move") {
-        ctx.lift = { pieceId: gesture.piece.id, liftMm: LIFT_MM };
+        ctx.lift = { pieceIds: gesture.stack.map((s) => s.piece.id), liftMm: LIFT_MM };
       }
     }
     if (gesture.kind === "pan") {
@@ -132,9 +149,15 @@ function setupControls(ctx: Ctx): void {
       ctx.cam = rotateAbout(ctx.cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE);
     } else if (gesture.kind === "move") {
       // The cursor drags the piece's footprint; the lift is visual only.
+      // Carried pieces follow at their original offsets (only the grabbed
+      // piece is clamped to the board, matching the server).
       const [wx, wy] = unproject(ctx.cam, e.clientX, e.clientY, pieceTopMm(gesture.piece));
-      gesture.piece.xMm = clamp(wx - gesture.grabXMm, 0, ctx.board.widthMm);
-      gesture.piece.yMm = clamp(wy - gesture.grabYMm, 0, ctx.board.heightMm);
+      const xMm = clamp(wx - gesture.grabXMm, 0, ctx.board.widthMm);
+      const yMm = clamp(wy - gesture.grabYMm, 0, ctx.board.heightMm);
+      for (const { piece, dxMm, dyMm } of gesture.stack) {
+        piece.xMm = xMm + dxMm;
+        piece.yMm = yMm + dyMm;
+      }
     } else {
       gesture.piece.rotationDeg += dx * SPIN_RATE;
     }
@@ -179,8 +202,9 @@ function setupControls(ctx: Ctx): void {
     commit(piece, button === 0 ? "double-click" : "double-right-click");
   }
 
-  // POST a piece action; the server responds with the authoritative piece
-  // state (double-click actions run the card's overridable handlers there).
+  // POST a piece action; the server responds with the authoritative state
+  // of every piece (moves restack z-indexes; double-click actions run the
+  // card's overridable handlers there).
   async function commit(piece: PieceDto, action: string, body?: unknown): Promise<void> {
     const res = await fetch(`/pieces/${piece.id}/${action}`, {
       method: "POST",
@@ -188,8 +212,11 @@ function setupControls(ctx: Ctx): void {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`${action} failed: ${res.status}`);
-    const state: PieceStateDto = await res.json();
-    Object.assign(piece, state);
+    const updates: PieceUpdateDto[] = await res.json();
+    for (const update of updates) {
+      const target = ctx.board.pieces.find((p) => p.id === update.id);
+      if (target) Object.assign(target, update);
+    }
     draw(ctx);
   }
 }

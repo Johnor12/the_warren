@@ -11,7 +11,9 @@ screen — primarily for automated testing by agents.
   (`npm run serve` first) in headless Edge and screenshot it. Ops (all
   numbers colon-separated): `<name>.png` (screenshot to `out/ui/`),
   `dblclick:x:y`, `rdblclick:x:y`, `drag:x1:y1:x2:y2`, `rdrag:x1:y1:x2:y2`,
-  `wheel:x:y:dy`, `wait:ms`. Exits non-zero if the page logged errors.
+  `down:x:y` / `move:x:y` / `up` (a left drag in steps, for mid-drag
+  screenshots), `wheel:x:y:dy`, `wait:ms`. Exits non-zero if the page
+  logged errors.
 
 See `.claude/skills/run-board/SKILL.md` for the full verification recipe
 (server lifecycle, screen-coordinate math, gotchas).

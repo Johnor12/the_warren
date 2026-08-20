@@ -39,9 +39,11 @@ npm run drive -- overview.png wheel:640:360:-1500 zoom.png dblclick:640:360 flip
 Ops, all numbers colon-separated (commas are eaten by npm on Windows):
 `<name>.png` (screenshot to `out/ui/`), `dblclick:x:y` (flip card),
 `rdblclick:x:y` (snap-rotate 45°), `drag:x1:y1:x2:y2` (move piece / pan),
-`rdrag:...` (spin piece / rotate camera), `wheel:x:y:dy` (negative dy =
-zoom in), `wait:ms`. The driver exits non-zero on page errors. Read the
-screenshot files — a blank/dark frame means the page failed to draw.
+`rdrag:...` (spin piece / rotate camera), `down:x:y` / `move:x:y` / `up`
+(a left drag in steps — screenshot between them to capture a lifted
+stack mid-drag), `wheel:x:y:dy` (negative dy = zoom in), `wait:ms`. The
+driver exits non-zero on page errors. Read the screenshot files — a
+blank/dark frame means the page failed to draw.
 
 ## 3. Finding a piece on screen
 

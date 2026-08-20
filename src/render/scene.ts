@@ -6,11 +6,12 @@
  *   pixel (0,0), xCorner = (width,0), yCorner = (0,height)). Face bitmaps
  *   map to the card shape (transparent outside the outline), so image ops
  *   need no clipping.
- * - Lift: a piece temporarily raised above the board (while being dragged).
+ * - Lift: pieces temporarily raised above the board (the stack being
+ *   dragged), so they float over anything they pass, however tall.
  * - buildScene(board, cam, lift?): board surface polygon, then each piece
- *   back-to-front (painter's algorithm, lifted piece on top) as its
- *   camera-facing outline-edge side polygons plus its visible-face image
- *   op, honoring each piece's rotation and faceUp state.
+ *   back-to-front (painter's algorithm: z-index, then view depth, lifted
+ *   pieces on top) as its camera-facing outline-edge side polygons plus its
+ *   visible-face image op, honoring each piece's rotation and faceUp state.
  * - pickPiece(board, cam, sx, sy): topmost piece under a screen point
  *   (point-in-outline-polygon test).
  * - pieceTopMm(piece): height of a piece's top face above the board.
@@ -41,7 +42,7 @@ export interface ImageOp {
 export type SceneOp = PolygonOp | ImageOp;
 
 export interface Lift {
-  pieceId: number;
+  pieceIds: number[]; // the dragged piece and everything stacked on it
   liftMm: number;
 }
 
@@ -63,7 +64,7 @@ export function buildScene(board: BoardDto, cam: Camera, lift?: Lift): SceneOp[]
     },
   ];
   for (const piece of paintOrder(board.pieces, cam, lift)) {
-    ops.push(...pieceOps(piece, cam, lift && piece.id === lift.pieceId ? lift.liftMm : 0));
+    ops.push(...pieceOps(piece, cam, lift?.pieceIds.includes(piece.id) ? lift.liftMm : 0));
   }
   return ops;
 }
@@ -87,13 +88,13 @@ export function pickPiece(
   });
 }
 
-// Painter's algorithm: the lifted piece last (it hovers above everything),
+// Painter's algorithm: the lifted stack last (it hovers above everything),
 // otherwise lower stacks first, then back-to-front in view space.
 function paintOrder(pieces: PieceDto[], cam: Camera, lift?: Lift): PieceDto[] {
   const cos = Math.cos(cam.yaw);
   const sin = Math.sin(cam.yaw);
   const depth = (p: PieceDto) => p.xMm * (cos + sin) + p.yMm * (cos - sin);
-  const lifted = (p: PieceDto) => (p.id === lift?.pieceId ? 1 : 0);
+  const lifted = (p: PieceDto) => (lift?.pieceIds.includes(p.id) ? 1 : 0);
   return [...pieces].sort(
     (a, b) => lifted(a) - lifted(b) || a.zIndex - b.zIndex || depth(a) - depth(b),
   );

@@ -1,12 +1,14 @@
 /* START
  * Test board definition: four cards spread on a 500x500mm board, covering
- * the "non-standard" card shapes.
+ * the "non-standard" card shapes, plus a 10-card deck in the center for
+ * exercising stacking.
  * - TestCard: standard 41x63mm card, white faces with "Front"/"Back" text.
  * - HexCard: hexagonal 95x83mm card (overrides outlineMm); its face bitmaps
  *   fill the hexagon (white hexagon on transparency), same text.
  * - BigCard: larger 63x88mm rectangular card, same text faces.
  * - ArtCard: standard 41x63mm card with front/back imported from PNG files
  *   in boards/assets/, scaled to the face dimensions.
+ * - The deck: ten TestCards placed on the same center spot (z 0-9).
  * - buildBoard(): builds and returns the completed board (used by the
  *   server to render it).
  * - Run directly (`npm run test-board`): prints the board summary and
@@ -92,6 +94,8 @@ export function buildBoard(): Board {
   board.place(new HexCard(), 365, 125);
   board.place(new BigCard(), 125, 365);
   board.place(new ArtCard(), 365, 365);
+  // A 10-card deck: same spot, so they stack in arrival order (z 0-9).
+  for (let i = 0; i < 10; i++) board.place(new TestCard(), 250, 250);
   return board;
 }
 

@@ -5,16 +5,29 @@ completed `Board` object — the playing surface plus every placed piece with
 its coordinates, rotation, face, and z-index. This object is what the
 rendering server consumes and mutates as the player interacts with pieces.
 
+Pieces stack: any two pieces whose footprints share area (even a partial
+overlap) occupy different z-indexes, ordered by arrival — later arrivals
+land on top. Moving a piece carries everything stacked on top of it;
+rotation and flipping affect only the one piece.
+
 ## API
 
 - `Board` — construct with `widthMm`/`heightMm`.
   - `place(card, xMm, yMm)` validates the card and places its center at the
-    given coordinates (face up, unrotated), returning a `PlacedPiece`.
+    given coordinates (face up, unrotated), stacked on top of anything it
+    overlaps, returning a `PlacedPiece`.
   - `piece(id)` looks up a placed piece.
-  - `movePiece(id, xMm, yMm)` / `rotatePiece(id, rotationDeg)` — core piece
-    manipulation (clamped to the board / normalized to [0, 360)); not
-    routed through Card handlers, so subclasses cannot override it.
+  - `movePiece(id, xMm, yMm)` — moves the piece (clamped to the board) and
+    everything stacked on top of it by the same delta, then re-resolves
+    z-indexes: the moved stack lands on top of whatever it now overlaps,
+    or re-bases to z 0 on empty board.
+  - `rotatePiece(id, rotationDeg)` — rotates one piece (normalized to
+    [0, 360)); never restacks. Neither move nor rotate is routed through
+    Card handlers, so subclasses cannot override them.
   - `centerX()`/`centerY()` give the board center; `describe()` returns a
     log-friendly summary.
-- `PlacedPiece` — `{ id, card, zIndex }` plus the mutable `PieceState`
-  (`xMm`, `yMm`, `rotationDeg`, `faceUp`).
+- `PlacedPiece` — `{ id, card, zIndex, outlineMm }` plus the mutable
+  `PieceState` (`xMm`, `yMm`, `rotationDeg`, `faceUp`).
+- `stacking.ts` — the pure stacking rules (`piecesOverlap`, `carriedStack`,
+  `restingZ`, `resolveZ`) over a minimal `StackPiece` shape; browser-safe,
+  also used by the renderer client for drag previews.

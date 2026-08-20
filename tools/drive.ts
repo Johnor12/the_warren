@@ -10,6 +10,8 @@
  *        rdblclick:x:y       double right click (snap-rotates 45°)
  *        drag:x1:y1:x2:y2    left-button drag (move piece / pan camera)
  *        rdrag:x1:y1:x2:y2   right-button drag (spin piece / rotate camera)
+ *        down:x:y / move:x:y / up   a left drag in steps, so screenshots
+ *                            can be taken mid-drag (e.g. a lifted stack)
  *        wheel:x:y:dy        mouse wheel at (x, y) (negative dy zooms in)
  *        wait:ms             pause
  * - Exits non-zero and prints console/page errors if the page threw
@@ -68,6 +70,13 @@ async function applyOp(page: Page, op: string): Promise<void> {
     await drag(page, a, "left");
   } else if (name === "rdrag") {
     await drag(page, a, "right");
+  } else if (name === "down") {
+    await page.mouse.move(a[0], a[1]);
+    await page.mouse.down();
+  } else if (name === "move") {
+    await page.mouse.move(a[0], a[1], { steps: 8 });
+  } else if (name === "up") {
+    await page.mouse.up();
   } else if (name === "wheel") {
     await page.mouse.move(a[0], a[1]);
     await page.mouse.wheel(0, a[2]);

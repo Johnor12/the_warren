@@ -1,25 +1,32 @@
 /* START
  * Board generation: the playing surface and the pieces placed on it.
  * - PlacedPiece: a card on the board with a unique id, a z-index (0 = on the
- *   table), and its mutable PieceState (center mm coordinates, rotation,
- *   which face is up).
+ *   table), its cached outline, and its mutable PieceState (center mm
+ *   coordinates, rotation, which face is up).
  * - Board: playing surface with mm dimensions.
  *   - place(card, xMm, yMm): validate the card and place it (its center) at
- *     the given coordinates; returns the PlacedPiece.
+ *     the given coordinates, stacking on top of anything it overlaps;
+ *     returns the PlacedPiece.
  *   - piece(id): look up a placed piece.
- *   - movePiece(id, xMm, yMm) / rotatePiece(id, rotationDeg): core piece
- *     manipulation (clamped to the board / normalized); not routed through
- *     Card handlers, so subclasses cannot override it.
+ *   - movePiece(id, xMm, yMm): move the piece (clamped to the board) and
+ *     everything stacked on top of it, then re-resolve z-indexes so the
+ *     moved stack lands on top of whatever it now overlaps.
+ *   - rotatePiece(id, rotationDeg): rotate one piece (normalized angle);
+ *     rotation never restacks. Neither move nor rotate is routed through
+ *     Card handlers, so subclasses cannot override them.
  *   - centerX() / centerY(): the board's center coordinates in mm.
  *   - describe(): human-readable summary of the board for logs.
  * END */
 
 import { Card, normalizeDeg, PieceState } from "../card/card.js";
+import { Polygon } from "../geometry/polygon.js";
+import { carriedStack, resolveZ, restingZ } from "./stacking.js";
 
 export interface PlacedPiece extends PieceState {
   id: number;
   card: Card;
   zIndex: number;
+  outlineMm: Polygon; // cached card.outlineMm(), for stacking overlap checks
 }
 
 export class Board {
@@ -49,7 +56,9 @@ export class Board {
       zIndex: 0,
       rotationDeg: 0,
       faceUp: true,
+      outlineMm: card.outlineMm(),
     };
+    piece.zIndex = restingZ(piece, this.pieces);
     this.pieces.push(piece);
     return piece;
   }
@@ -58,10 +67,18 @@ export class Board {
     return this.pieces.find((p) => p.id === id);
   }
 
+  // Move the piece and everything stacked on top of it by the same delta
+  // (the piece itself clamped to the board), then re-resolve z-indexes.
   movePiece(id: number, xMm: number, yMm: number): PlacedPiece {
     const piece = this.requirePiece(id);
-    piece.xMm = Math.min(this.widthMm, Math.max(0, xMm));
-    piece.yMm = Math.min(this.heightMm, Math.max(0, yMm));
+    const stack = carriedStack(this.pieces, piece);
+    const dx = Math.min(this.widthMm, Math.max(0, xMm)) - piece.xMm;
+    const dy = Math.min(this.heightMm, Math.max(0, yMm)) - piece.yMm;
+    for (const member of stack) {
+      member.xMm += dx;
+      member.yMm += dy;
+    }
+    resolveZ(this.pieces, stack);
     return piece;
   }
 

@@ -3,8 +3,10 @@
  * the emitted draw ops — then apply each camera mutation (pan, zoom,
  * rotate) and confirm the scene renders as expected: shifted points,
  * scaled points, flipped draw order and side faces. Also covers piece
- * state rendering (rotation, face-down, lift), pickPiece hit testing, and
- * non-rectangular outlines (hexagon sides, image clip, hit testing).
+ * state rendering (rotation, face-down, lift), stacks (bottom-up draw
+ * order, a lifted piece floating over a tall stack, topmost-piece picking),
+ * pickPiece hit testing, and non-rectangular outlines (hexagon sides,
+ * image clip, hit testing).
  * END */
 
 import { test } from "node:test";
@@ -114,12 +116,53 @@ test("a face-down piece renders its back image", () => {
 });
 
 test("a lifted piece rises by liftMm and is drawn on top", () => {
-  const ops = buildScene(BOARD, CAM, { pieceId: 1, liftMm: 20 });
+  const ops = buildScene(BOARD, CAM, { pieceIds: [1], liftMm: 20 });
   assert.deepEqual(
     imageOps(ops).map((op) => op.url),
     ["/pieces/2/front.png", "/pieces/1/front.png"],
   );
   assertClose(imageOps(ops)[1].origin, project(CAM, 45, 45, 20 + Z_TOP));
+});
+
+// A 200x100mm board with a 10-piece stack at (50, 50) (ids 1-10, z 0-9)
+// and a lone piece 11 at (150, 50).
+function makeStackBoard(): BoardDto {
+  const board = new Board(200, 100);
+  for (let i = 0; i < 10; i++) board.place(new TestCard(), 50, 50);
+  board.place(new TestCard(), 150, 50);
+  return boardToDto(board);
+}
+
+test("a stack is drawn bottom-up, lower layers everywhere first", () => {
+  const ops = buildScene(makeStackBoard(), CAM);
+  const urls = imageOps(ops).map((op) => op.url);
+  assert.equal(urls.length, 11);
+  // z 0 back-to-front (stack bottom, then the nearer lone piece), then the
+  // stack's remaining layers in z order.
+  assert.equal(urls[0], "/pieces/1/front.png");
+  assert.equal(urls[1], "/pieces/11/front.png");
+  assert.equal(urls[10], "/pieces/10/front.png");
+  // The stack's top face sits 10 thicknesses up.
+  assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 10 * 0.3));
+});
+
+test("a piece dragged past a tall stack floats over it, never through it", () => {
+  const board = makeStackBoard();
+  // Piece 11 (z 0) dragged directly over the 10-piece stack.
+  board.pieces[10].xMm = 50;
+  board.pieces[10].yMm = 50;
+  const ops = buildScene(board, CAM, { pieceIds: [11], liftMm: 20 });
+  const urls = imageOps(ops).map((op) => op.url);
+  // Painted after every stack piece (over it), and physically above the
+  // stack's 3mm top: lifted to 20mm.
+  assert.equal(urls[10], "/pieces/11/front.png");
+  assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 20 + 0.3));
+});
+
+test("clicking a stack picks the topmost piece", () => {
+  const board = makeStackBoard();
+  const topMm = 10 * 0.3;
+  assert.equal(pickPiece(board, CAM, ...project(CAM, 50, 50, topMm))?.id, 10);
 });
 
 test("pickPiece finds the piece under a screen point", () => {

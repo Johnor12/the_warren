@@ -1,7 +1,9 @@
 /* START
  * Unit tests for the Board's core piece manipulation: initial piece state,
- * movePiece clamping to the board bounds, rotatePiece normalization, and
- * lookup of unknown ids.
+ * movePiece clamping to the board bounds, rotatePiece normalization,
+ * lookup of unknown ids, and stacking (placement arrival order, moves
+ * carrying the pieces stacked on top, z re-resolution on drop, dropping
+ * onto a tall stack, and rotation leaving z-indexes alone).
  * END */
 
 import { test } from "node:test";
@@ -48,4 +50,80 @@ test("unknown piece ids: piece() is undefined, mutations throw", () => {
   const board = makeBoard();
   assert.equal(board.piece(99), undefined);
   assert.throws(() => board.movePiece(99, 0, 0), /no piece/);
+});
+
+function zOf(board: Board, ...ids: number[]): number[] {
+  return ids.map((id) => board.piece(id)!.zIndex);
+}
+
+test("pieces placed on the same spot stack in arrival order", () => {
+  const board = new Board(200, 100);
+  for (let i = 0; i < 10; i++) board.place(new PlainCard(), 50, 50);
+  assert.deepEqual(zOf(board, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test("a partial overlap stacks; a clear placement does not", () => {
+  const board = makeBoard();
+  board.place(new PlainCard(), 55, 55); // overlaps piece 1's corner
+  board.place(new PlainCard(), 150, 50); // clear
+  assert.deepEqual(zOf(board, 1, 2, 3), [0, 1, 0]);
+});
+
+test("moving a card onto another stacks it on top", () => {
+  const board = makeBoard();
+  board.place(new PlainCard(), 150, 50);
+  board.movePiece(2, 52, 50);
+  assert.deepEqual(zOf(board, 1, 2), [0, 1]);
+});
+
+test("moving a card onto a 10-card stack lands on top of the stack", () => {
+  const board = new Board(200, 100);
+  for (let i = 0; i < 10; i++) board.place(new PlainCard(), 50, 50);
+  const mover = board.place(new PlainCard(), 150, 50);
+  board.movePiece(mover.id, 50, 50);
+  assert.equal(mover.zIndex, 10);
+  // The stack underneath is untouched.
+  assert.deepEqual(zOf(board, 1, 10), [0, 9]);
+});
+
+test("moving a lower card carries everything stacked on top of it", () => {
+  const board = makeBoard();
+  board.place(new PlainCard(), 55, 50); // z 1, on piece 1
+  board.place(new PlainCard(), 60, 50); // z 2, on piece 2 (and clear of 1)
+  board.movePiece(1, 150, 50);
+  // Offsets preserved, whole stack moved, z order kept.
+  assert.deepEqual(zOf(board, 1, 2, 3), [0, 1, 2]);
+  assert.deepEqual(
+    board.pieces.map((p) => p.xMm),
+    [150, 155, 160],
+  );
+});
+
+test("moving a mid-stack card carries only the cards above it and re-bases them", () => {
+  const board = makeBoard();
+  board.place(new PlainCard(), 55, 50); // z 1
+  board.place(new PlainCard(), 60, 50); // z 2
+  board.movePiece(2, 150, 50);
+  // Piece 1 stays; pieces 2 and 3 land on empty board re-based to z 0 and 1.
+  assert.deepEqual(zOf(board, 1, 2, 3), [0, 0, 1]);
+  assert.deepEqual(
+    board.pieces.map((p) => p.xMm),
+    [50, 150, 155],
+  );
+});
+
+test("pulling the top card off a stack rests it on the board", () => {
+  const board = new Board(200, 100);
+  board.place(new PlainCard(), 50, 50);
+  board.place(new PlainCard(), 50, 50);
+  board.movePiece(2, 150, 50);
+  assert.deepEqual(zOf(board, 1, 2), [0, 0]);
+});
+
+test("rotating and flipping never restack", () => {
+  const board = new Board(200, 100);
+  board.place(new PlainCard(), 50, 50);
+  board.place(new PlainCard(), 50, 50);
+  board.rotatePiece(1, 45); // bottom card of the stack
+  assert.deepEqual(zOf(board, 1, 2), [0, 1]);
 });
