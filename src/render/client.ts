@@ -7,9 +7,9 @@
  *   redraws on resize and on camera/piece changes.
  * - setupControls(): the gesture state machine. On a piece (its whole 3D
  *   body is clickable): left-drag moves it plus everything stacked on top
- *   of it — the stack is rendered where it would land if dropped right now
- *   (scene.ts resolveDrag: cursor read on the grab plane, resting height
- *   from footprint overlaps), so it drops exactly where it appears;
+ *   of it — every stack member is rendered where it would land if dropped
+ *   right now (scene.ts resolveDrag: cursor read on the grab plane, per-
+ *   piece landing heights), so it drops exactly where it appears;
  *   right-drag rotates just that piece, double click / double right
  *   click POST to the server, which runs the component's overridable
  *   handlers (cards flip / snap-rotate 45°). Clicks always hit the topmost
@@ -112,7 +112,6 @@ type Gesture =
       grabXMm: number;
       grabYMm: number;
       grabZMm: number; // height of the grab plane (the piece's top at grab)
-      supportMm: number; // height the piece would rest on, from resolveDrag
     }
   | { kind: "spin"; piece: PieceDto };
 
@@ -152,7 +151,6 @@ function setupControls(ctx: Ctx): void {
         grabXMm: wx - piece.xMm,
         grabYMm: wy - piece.yMm,
         grabZMm: topMm,
-        supportMm: topMm - piece.thicknessMm,
       };
     } else {
       gesture = { kind: "spin", piece };
@@ -168,23 +166,17 @@ function setupControls(ctx: Ctx): void {
     if (!dragging) {
       if (Math.hypot(e.clientX - startX, e.clientY - startY) < CLICK_PX) return;
       dragging = true;
-      if (gesture.kind === "move") {
-        ctx.drag = {
-          pieceIds: gesture.stack.map((s) => s.piece.id),
-          bottomMm: gesture.supportMm,
-        };
-      }
     }
     if (gesture.kind === "pan") {
       ctx.cam = pan(ctx.cam, dx, dy);
     } else if (gesture.kind === "orbit") {
       ctx.cam = rotateAbout(ctx.cam, canvas.width / 2, canvas.height / 2, dx * ROTATE_RATE);
     } else if (gesture.kind === "move") {
-      // The stack is rendered where it would land if dropped right now:
-      // resolveDrag reads the cursor on the grab plane and reports the
-      // support the footprint would rest on. Carried pieces follow at
-      // their original offsets (only the grabbed piece is clamped to the
-      // board, matching the server).
+      // Every stack member is rendered where it would land if dropped right
+      // now: resolveDrag reads the cursor on the grab plane and reports
+      // per-piece landing heights. Carried pieces follow at their original
+      // offsets (only the grabbed piece is clamped to the board, matching
+      // the server).
       const res = resolveDrag(ctx.board, ctx.cam, e.clientX, e.clientY, {
         piece: gesture.piece,
         carriedIds: gesture.stack.map((s) => s.piece.id),
@@ -192,12 +184,11 @@ function setupControls(ctx: Ctx): void {
         grabYMm: gesture.grabYMm,
         grabZMm: gesture.grabZMm,
       });
-      gesture.supportMm = res.supportMm;
       for (const { piece, dxMm, dyMm } of gesture.stack) {
         piece.xMm = res.xMm + dxMm;
         piece.yMm = res.yMm + dyMm;
       }
-      if (ctx.drag) ctx.drag.bottomMm = res.supportMm;
+      ctx.drag = { bottomsMm: res.bottomsMm };
     } else {
       gesture.piece.rotationDeg += dx * SPIN_RATE;
     }

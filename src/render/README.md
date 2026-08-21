@@ -9,19 +9,22 @@ Controls: on empty board, left-drag pans, mouse wheel zooms about the
 cursor, right-drag left/right rotates the view around the screen center.
 On a piece (a piece's whole visible body is clickable — top and side
 faces — and clicks hit the topmost piece under the cursor): left-drag
-moves it plus everything stacked on top of it — the stack is rendered
-where it would land if dropped at that moment (resting on the board, or
-on top of whatever its footprint overlaps) and drops exactly where it
-appears, so releasing a piece over another's body rests it on top, never
-inside it; right-drag rotates just that piece, double click flips it
+moves it plus everything stacked on top of it — every stack member is
+rendered where it would land if dropped at that moment (resting on the
+board, on the stack itself, or on whatever its own footprint overlaps: a
+carried card passing over a taller piece is shown settling onto it while
+the stack stays whole for the rest of the drag) and drops exactly where
+it appears, so releasing a piece over another's body rests it on top,
+never inside it; right-drag rotates just that piece, double click flips it
 (cards; objects do nothing by default), double right click snap-rotates
 it 45° — the double clicks run the component's overridable handlers on
 the server.
 
 Cards render as their face bitmaps plus gray side faces; 3D objects render
 as their shape prisms — camera-facing sides shaded from the surface color,
-tops in the full color. Physical heights honor mixed thicknesses: a card
-dropped on an 8mm cube draws (and is picked) at 8mm.
+tops in the full color. Physical heights honor the actual shapes: a card
+dropped on an 8mm cube draws (and is picked) at 8mm, and one dropped on a
+tiered object rests on the tier under it, not the bounding-box top.
 
 ## API
 
@@ -52,8 +55,8 @@ dropped on an 8mm cube draws (and is picked) at 8mm.
   contains the screen point.
 - `resolveDrag(board, cam, sx, sy, spec)` — drag resolution: reads the
   cursor on the fixed plane the piece was grabbed on (1:1 screen-to-world
-  motion, no dead zones) and returns `{xMm, yMm, supportMm}`, where
-  supportMm is what the piece would land on there — the tallest settled
-  piece its footprint overlaps, or the board.
+  motion, no dead zones) and returns `{xMm, yMm, bottomsMm}`, where
+  bottomsMm maps each stack member's id to the height it would land at
+  there (`landingBottoms` in src/board/stacking.ts).
 - `client.ts` — browser entry point; not imported by server code, but
   bundled (esbuild) and served as `/client.js`.

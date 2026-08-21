@@ -7,27 +7,28 @@
  *   map to the card shape (transparent outside the outline), so image ops
  *   need no clipping.
  * - Drag: the stack being dragged (dragged piece + carried pieces), with
- *   the height its base would land at right now; the stack is rendered at
- *   exactly its drop pose, and carried pieces keep their in-stack heights.
+ *   the height each member would land at right now (landingBottoms); the
+ *   stack is rendered at exactly its drop pose — a carried piece over a
+ *   taller settled piece is shown resting on it, out of the stack.
  * - buildScene(board, cam, drag?): board surface polygon, then each piece
  *   back-to-front (paintOrder: a physical occlusion sort — overlapping
  *   footprints draw bottom-up, disjoint ones far-to-near along the view
- *   direction). Physical heights come from stackBottoms (thicknesses
- *   vary — a card on an 8mm cube renders at 8mm). Cards draw their
- *   camera-facing outline-edge side polygons plus the visible-face image
- *   op; objects draw each prism bottom-up as shaded side polygons plus a
- *   top polygon in the surface color. Both honor rotation.
+ *   direction). Physical heights come from stackBottoms (shape-aware —
+ *   a card on an 8mm cube renders at 8mm, on a tiered object at the top
+ *   of the tier under it). Cards draw their camera-facing outline-edge
+ *   side polygons plus the visible-face image op; objects draw each prism
+ *   bottom-up as shaded side polygons plus a top polygon in the surface
+ *   color. Both honor rotation.
  * - pickPiece(board, cam, sx, sy): frontmost piece under a screen point,
  *   testing the piece's full projected silhouette (top, bottom, and side
  *   faces of its outline extrusion), so clicking a 3D body works.
  * - resolveDrag(board, cam, sx, sy, spec): reads the cursor on the fixed
  *   plane the piece was grabbed on (1:1 screen-to-world motion, no jumps)
- *   and returns the position plus the support height the piece would land
- *   on there — the tallest settled piece its footprint overlaps, or 0.
+ *   and returns the position plus each stack member's landing height there.
  * - pieceTopMm(pieces, piece): height of a piece's top face above the board.
  * END */
 
-import { footprint, piecesOverlap, stackBottoms } from "../board/stacking.js";
+import { footprint, landingBottoms, stackBottoms } from "../board/stacking.js";
 import { convexHull, pointInPolygon, Polygon, polygonsOverlap } from "../geometry/polygon.js";
 import { Camera, project, unproject } from "./camera.js";
 import { BoardDto, ObjectDto, PieceDto } from "./types.js";
@@ -55,8 +56,9 @@ export interface ImageOp {
 export type SceneOp = PolygonOp | ImageOp;
 
 export interface Drag {
-  pieceIds: number[]; // the dragged piece and everything stacked on it
-  bottomMm: number; // height the dragged stack's base would land at
+  // pieceId -> the height that stack member would land at if dropped right
+  // now (resolveDrag), covering the dragged piece and everything carried.
+  bottomsMm: Map<number, number>;
 }
 
 // Height of the piece's top face above the board, given every piece on it
@@ -79,18 +81,13 @@ export function buildScene(board: BoardDto, cam: Camera, drag?: Drag): SceneOp[]
     },
   ];
   // The dragged stack is in motion: it doesn't rest on (or support) settled
-  // pieces. Carried pieces keep their heights within the stack itself.
-  const dragIds = new Set(drag?.pieceIds ?? []);
-  const settledBottoms = stackBottoms(board.pieces.filter((p) => !dragIds.has(p.id)));
-  const innerBottoms = stackBottoms(board.pieces.filter((p) => dragIds.has(p.id)));
+  // pieces. Each dragged piece renders at the height it would land at if
+  // dropped right now, so the drop frame matches the preview exactly.
+  const dragBottoms = drag?.bottomsMm ?? new Map<number, number>();
+  const settledBottoms = stackBottoms(board.pieces.filter((p) => !dragBottoms.has(p.id)));
   const bottoms = new Map<PieceDto, number>();
   for (const piece of board.pieces) {
-    bottoms.set(
-      piece,
-      dragIds.has(piece.id)
-        ? drag!.bottomMm + innerBottoms.get(piece)!
-        : settledBottoms.get(piece)!,
-    );
+    bottoms.set(piece, dragBottoms.get(piece.id) ?? settledBottoms.get(piece)!);
   }
   for (const piece of paintOrder(board.pieces, cam, bottoms)) {
     ops.push(...pieceOps(piece, cam, bottoms.get(piece)!));
@@ -145,31 +142,33 @@ export interface DragSpec {
   grabZMm: number;
 }
 
-// Interpret the cursor for a dragged piece: read it on the fixed horizontal
+// Interpret the cursor for a dragged stack: read it on the fixed horizontal
 // plane the piece was grabbed on, so cursor motion maps 1:1 to world motion
 // — the landing height never feeds back into the position, which is what
-// kept the old drag sticking and jumping at piece edges. supportMm is what
-// the piece would land on at that position (the tallest settled piece its
-// footprint overlaps, or the board): the stack is rendered, and dropped, at
-// exactly that height.
+// kept the old drag sticking and jumping at piece edges. bottomsMm is where
+// each stack member would land if dropped at that position (landingBottoms):
+// the stack is rendered, and dropped, at exactly those heights — a carried
+// piece over a taller settled piece is shown resting on it.
 export function resolveDrag(
   board: BoardDto,
   cam: Camera,
   sx: number,
   sy: number,
   spec: DragSpec,
-): { xMm: number; yMm: number; supportMm: number } {
+): { xMm: number; yMm: number; bottomsMm: Map<number, number> } {
   const [wx, wy] = unproject(cam, sx, sy, spec.grabZMm);
   const xMm = clamp(wx - spec.grabXMm, 0, board.widthMm);
   const yMm = clamp(wy - spec.grabYMm, 0, board.heightMm);
   const carried = new Set(spec.carriedIds);
   const settled = board.pieces.filter((p) => !carried.has(p.id));
-  const bottoms = stackBottoms(settled);
-  const candidate = { ...spec.piece, xMm, yMm };
-  const supportMm = settled
-    .filter((p) => piecesOverlap(candidate, p))
-    .reduce((top, p) => Math.max(top, bottoms.get(p)! + p.thicknessMm), 0);
-  return { xMm, yMm, supportMm };
+  // The stack moves rigidly, so every member shares the base piece's delta.
+  const dx = xMm - spec.piece.xMm;
+  const dy = yMm - spec.piece.yMm;
+  const moving = board.pieces
+    .filter((p) => carried.has(p.id))
+    .map((p) => ({ ...p, xMm: p.xMm + dx, yMm: p.yMm + dy }));
+  const landing = landingBottoms(settled, moving);
+  return { xMm, yMm, bottomsMm: new Map(moving.map((p) => [p.id, landing.get(p)!])) };
 }
 
 function clamp(value: number, min: number, max: number): number {

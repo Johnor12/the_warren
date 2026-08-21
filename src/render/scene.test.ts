@@ -11,8 +11,10 @@
  * are clickable), non-rectangular outlines (hexagon sides, image clip, hit
  * testing), 3D objects (prism side/top polygons with shaded colors,
  * physical heights when cards stack on cubes), and resolveDrag (cursor
- * read on the grab plane, landing support from footprint overlaps, no
- * dead zones crossing piece edges).
+ * read on the grab plane, per-piece landing heights — a carried piece
+ * over a taller settled piece previews on top of it, tiered objects
+ * support at the tier under the footprint — and no dead zones crossing
+ * piece edges).
  * END */
 
 import { test } from "node:test";
@@ -123,8 +125,8 @@ test("a face-down piece renders its back image", () => {
   );
 });
 
-test("a dragged piece renders at the drag's base height", () => {
-  const ops = buildScene(BOARD, CAM, { pieceIds: [1], bottomMm: 20 });
+test("a dragged piece renders at its landing height", () => {
+  const ops = buildScene(BOARD, CAM, { bottomsMm: new Map([[1, 20]]) });
   assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 20 + Z_TOP));
 });
 
@@ -153,7 +155,7 @@ test("a piece dragged over a tall stack renders on top of it, never inside it", 
   // on the stack's 3mm top.
   board.pieces[10].xMm = 50;
   board.pieces[10].yMm = 50;
-  const ops = buildScene(board, CAM, { pieceIds: [11], bottomMm: 3 });
+  const ops = buildScene(board, CAM, { bottomsMm: new Map([[11, 3]]) });
   const urls = imageOps(ops).map((op) => op.url);
   // Painted after every stack piece (over it), sitting on the stack's top.
   assert.equal(urls[10], "/pieces/11/front.png");
@@ -342,14 +344,14 @@ test("resolveDrag keeps a cube dragged partway down another cube on top of it", 
   // The cursor over the bottom cube: the footprints still overlap, so the
   // piece would land on the bottom cube's 8mm top.
   const res = resolveDrag(board, CAM, ...project(CAM, 53, 53, 16), dragTopCube(board));
-  assert.equal(res.supportMm, 8);
+  assert.equal(res.bottomsMm.get(2), 8);
   assertClose([res.xMm, res.yMm], [53, 53]);
 });
 
 test("resolveDrag lands the piece on the board once the footprint is clear", () => {
   const board = makeCubeStackBoard();
   const res = resolveDrag(board, CAM, ...project(CAM, 70, 70, 16), dragTopCube(board));
-  assert.equal(res.supportMm, 0);
+  assert.equal(res.bottomsMm.get(2), 0);
   assertClose([res.xMm, res.yMm], [70, 70]);
 });
 
@@ -362,17 +364,67 @@ test("resolveDrag tracks the cursor 1:1 across a cube's edge, no dead zone", () 
   for (let t = 50; t <= 70; t += 0.5) {
     const res = resolveDrag(board, CAM, ...project(CAM, t, t, 16), dragTopCube(board));
     assertClose([res.xMm, res.yMm], [t, t]);
-    assert.equal(res.supportMm, t < 58 ? 8 : 0, `support at ${t}`);
+    assert.equal(res.bottomsMm.get(2), t < 58 ? 8 : 0, `support at ${t}`);
   }
 });
 
-test("a dragged stack keeps its inner heights above the drag base", () => {
+test("dragged pieces render at their individual landing heights", () => {
   const board = new Board(200, 100);
   board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
   board.place(new TestCard(), 50, 50);
-  const ops = buildScene(boardToDto(board), CAM, { pieceIds: [1, 2], bottomMm: 20 });
+  const drag = { bottomsMm: new Map([[1, 20], [2, 28]]) };
+  const ops = buildScene(boardToDto(board), CAM, drag);
   // The carried card rides on the dragged cube: 20 + 8mm up.
-  assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 20 + 8 + 0.3));
+  assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 28 + 0.3));
+});
+
+test("a carried card over a settled cube previews resting on the cube", () => {
+  const board = new Board(200, 100);
+  board.place(new TestCard(), 50, 50); // dragged base card
+  board.place(new TestCard(), 56, 50); // carried, overhanging the base
+  board.place(new GameObject({ color: CUBE_COLOR }), 66, 50); // settled cube
+  const dto = boardToDto(board);
+  // Grab the base card's top-face center and drag it 6mm east: the base
+  // stays clear of the cube, but the carried card now overlaps it.
+  const spec = { piece: dto.pieces[0], carriedIds: [1, 2], grabXMm: 0, grabYMm: 0, grabZMm: 0.3 };
+  const over = resolveDrag(dto, CAM, ...project(CAM, 56, 50, 0.3), spec);
+  assert.equal(over.bottomsMm.get(1), 0);
+  assert.equal(over.bottomsMm.get(2), 8);
+  // Dragged past the cube, the stack is whole again: the card back on the base.
+  const past = resolveDrag(dto, CAM, ...project(CAM, 90, 50, 0.3), spec);
+  assert.equal(past.bottomsMm.get(1), 0);
+  assert.equal(past.bottomsMm.get(2), 0.3);
+});
+
+// A 24x24x30mm two-tier tower: full-footprint 18mm base, narrow upper tier.
+class TieredTower extends GameObject {
+  constructor() {
+    super({ lengthMm: 24, widthMm: 24, heightMm: 30, color: CUBE_COLOR });
+  }
+
+  override shapeMm(): Prism[] {
+    const cap: Outline = [
+      [-4, -4],
+      [4, -4],
+      [4, 4],
+      [-4, 4],
+    ];
+    return [
+      { outlineMm: this.outlineMm(), bottomMm: 0, topMm: 18 },
+      { outlineMm: cap, bottomMm: 18, topMm: 30 },
+    ];
+  }
+}
+
+test("a card lands on the tier under it, not the tower's bounding-box top", () => {
+  const board = new Board(200, 100);
+  board.place(new TieredTower(), 50, 50);
+  board.place(new TestCard(), 40, 50); // overlaps only the 18mm base tier
+  board.place(new TestCard(), 50, 50); // overlaps the 30mm cap
+  const dto = boardToDto(board);
+  const ops = imageOps(buildScene(dto, CAM));
+  assertClose(ops[0].origin, project(CAM, 35, 45, 18 + 0.3));
+  assertClose(ops[1].origin, project(CAM, 45, 45, 30 + 0.3));
 });
 
 test("a tall piece in front of a stack draws over the stack's raised cards", () => {

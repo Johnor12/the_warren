@@ -3,7 +3,9 @@
  * z-index resolution. Works on a minimal piece shape (StackPiece) so both
  * the server's PlacedPiece and the browser's PieceDto satisfy it; browser
  * safe (no node imports).
- * - StackPiece: position, rotation, zIndex, and the card-local outline.
+ * - StackPiece: position, rotation, zIndex, the piece-local outline, and
+ *   optionally the shape prisms (pieces rest on prisms, not bounding
+ *   boxes; absent — cards — means one prism filling outline x thickness).
  * - footprint(piece): the piece's outline in world mm coordinates.
  * - piecesOverlap(a, b): whether two pieces' footprints share area (a
  *   shared edge alone doesn't count).
@@ -14,9 +16,13 @@
  * - resolveZ(pieces, moved): reassign every z-index bottom-up after a move;
  *   settled pieces keep their relative order, the moved stack arrives last
  *   so it lands on top of whatever it now overlaps.
- * - stackBottoms(pieces): each piece's physical bottom height in mm (piece
- *   thicknesses vary — a card resting on an 8mm cube sits at 8mm), for
+ * - stackBottoms(pieces): each piece's physical bottom height in mm — the
+ *   tallest shape surface under its footprint (a card on an 8mm cube sits
+ *   at 8mm; on a tiered object's low tier, at that tier's top), for
  *   rendering and hit testing.
+ * - landingBottoms(settled, moving): where each member of a moving stack
+ *   would land if dropped right now — the drag preview, matching the
+ *   post-drop resolveZ + stackBottoms result exactly.
  * END */
 
 import { Polygon, polygonsOverlap } from "../geometry/polygon.js";
@@ -30,18 +36,45 @@ export interface StackPiece {
   zIndex: number;
   outlineMm: Polygon;
   thicknessMm: number;
+  // The physical shape as vertical extrusions (see component.ts Prism):
+  // pieces rest on the tallest prism under their footprint. Absent (cards):
+  // one prism filling outline x thickness.
+  prisms?: { outlineMm: Polygon; topMm: number }[];
 }
 
 // The piece's outline in world coordinates (rotated about its center,
 // translated to its position).
 export function footprint(piece: StackPiece): Polygon {
+  return worldOutline(piece, piece.outlineMm);
+}
+
+// A piece-local outline placed into world coordinates.
+function worldOutline(piece: StackPiece, outline: Polygon): Polygon {
   const rad = (piece.rotationDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
-  return piece.outlineMm.map(([x, y]) => [
+  return outline.map(([x, y]) => [
     piece.xMm + x * cos - y * sin,
     piece.yMm + x * sin + y * cos,
   ]);
+}
+
+// The top of support's surface under piece's footprint, relative to
+// support's bottom: the tallest shape prism the footprint overlaps. null
+// when no prism is under the piece (footprints apart, or only empty
+// bounding box crossed), so support holds nothing up there.
+function surfaceTopMm(support: StackPiece, piece: StackPiece): number | null {
+  const foot = footprint(piece);
+  const prisms = support.prisms ?? [
+    { outlineMm: support.outlineMm, topMm: support.thicknessMm },
+  ];
+  let top: number | null = null;
+  for (const prism of prisms) {
+    if (polygonsOverlap(worldOutline(support, prism.outlineMm), foot)) {
+      top = Math.max(top ?? 0, prism.topMm);
+    }
+  }
+  return top;
 }
 
 export function piecesOverlap(a: StackPiece, b: StackPiece): boolean {
@@ -53,17 +86,20 @@ export function piecesOverlap(a: StackPiece, b: StackPiece): boolean {
 const HEIGHT_EPS_MM = 1e-6;
 
 // base plus every piece physically resting on it, transitively, in ascending
-// z order: a piece is carried when its bottom sits on a member's top and
-// their footprints overlap. Footprint overlap from a higher z alone is not
-// enough — a card overhanging its cube may hang above a ground card that
-// belongs to a different stack.
+// z order: a piece is carried when its bottom sits on a member's surface
+// under it. Footprint overlap from a higher z alone is not enough — a card
+// overhanging its cube may hang above a ground card that belongs to a
+// different stack.
 export function carriedStack<T extends StackPiece>(pieces: T[], base: T): T[] {
   const bottoms = stackBottoms(pieces);
-  const restsOn = (piece: T, support: T) =>
-    piece.zIndex > support.zIndex &&
-    Math.abs(bottoms.get(piece)! - (bottoms.get(support)! + support.thicknessMm)) <
-      HEIGHT_EPS_MM &&
-    piecesOverlap(piece, support);
+  const restsOn = (piece: T, support: T) => {
+    if (piece.zIndex <= support.zIndex) return false;
+    const surface = surfaceTopMm(support, piece);
+    return (
+      surface !== null &&
+      Math.abs(bottoms.get(piece)! - (bottoms.get(support)! + surface)) < HEIGHT_EPS_MM
+    );
+  };
   const stack = [base];
   const above = pieces
     .filter((p) => p !== base && p.zIndex > base.zIndex)
@@ -97,8 +133,8 @@ export function resolveZ(pieces: StackPiece[], moved: StackPiece[]): void {
   }
 }
 
-// Each piece's physical bottom height: resting on the tallest top among the
-// overlapped pieces below it (by z-index), or 0 on the board. z-indexes stay
+// Each piece's physical bottom height: resting on the tallest shape surface
+// among the pieces below it (by z-index), or 0 on the board. z-indexes stay
 // the stacking model; heights only matter for rendering and hit testing.
 export function stackBottoms<T extends StackPiece>(pieces: T[]): Map<T, number> {
   const sorted = [...pieces].sort((a, b) => a.zIndex - b.zIndex);
@@ -107,11 +143,41 @@ export function stackBottoms<T extends StackPiece>(pieces: T[]): Map<T, number> 
     let bottom = 0;
     for (const other of sorted) {
       if (other.zIndex >= piece.zIndex) break;
-      if (piecesOverlap(piece, other)) {
-        bottom = Math.max(bottom, bottoms.get(other)! + other.thicknessMm);
+      const surface = surfaceTopMm(other, piece);
+      if (surface !== null) {
+        bottom = Math.max(bottom, bottoms.get(other)! + surface);
       }
     }
     bottoms.set(piece, bottom);
   }
   return bottoms;
+}
+
+// Where each member of a moving stack would land if dropped right now:
+// members settle bottom-up (stack order), each resting on the tallest
+// surface under it — a settled piece or an already-landed member. Matches
+// what resolveZ + stackBottoms produce after a real drop, so a drag
+// preview rendered at these heights is exactly the drop result: a carried
+// piece passing over a taller settled piece is shown landing on it while
+// the stack itself stays whole for the rest of the drag.
+export function landingBottoms<T extends StackPiece>(
+  settled: T[],
+  moving: T[],
+): Map<T, number> {
+  const bottoms = stackBottoms(settled);
+  const supports = [...settled];
+  const landing = new Map<T, number>();
+  for (const piece of [...moving].sort((a, b) => a.zIndex - b.zIndex)) {
+    let bottom = 0;
+    for (const support of supports) {
+      const surface = surfaceTopMm(support, piece);
+      if (surface !== null) {
+        bottom = Math.max(bottom, bottoms.get(support)! + surface);
+      }
+    }
+    bottoms.set(piece, bottom);
+    landing.set(piece, bottom);
+    supports.push(piece);
+  }
+  return landing;
 }

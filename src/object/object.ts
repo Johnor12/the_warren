@@ -7,27 +7,21 @@
  *   cube, set via the constructor spec or subclass field overrides. The
  *   box's footprint (outlineMm) drives stacking and inputs; thicknessMm is
  *   the box height.
- * - shapeMm(): the rendered 3D shape as Prisms (vertical extrusions of a
- *   polygon) inside the bounding box; default: one prism filling the box
- *   (a solid cuboid). Override for other shapes (tiers, hex tokens, ...).
+ * - shapeMm() (inherited from Component; default: one prism filling the
+ *   box, a solid cuboid): the physical and rendered 3D shape as Prisms.
+ *   Override for other shapes (tiers, hex tokens, ...) — pieces stack on
+ *   the actual prisms, not the bounding box.
  * - color: the surface Color of the rendered shape (no textures).
  * - assertValid() checks: positive dimensions, the outline and every prism
  *   inside the bounding box, and prism z-ranges within [0, heightMm].
- * - Prism: { outlineMm, bottomMm, topMm } in object-local mm coordinates.
+ * - Prism: re-exported from src/component/ for object subclasses.
  * - GameObjectSpec: the optional constructor spec (dimensions + color).
  * END */
 
 import { Component, Outline, rectangleOutline } from "../component/component.js";
 import { Color } from "../image/image.js";
 
-// A vertical extrusion of a polygon: the building block of object shapes.
-// outlineMm is in object-local mm around the object center; bottomMm/topMm
-// are heights above the object's base.
-export interface Prism {
-  outlineMm: Outline;
-  bottomMm: number;
-  topMm: number;
-}
+export type { Prism } from "../component/component.js";
 
 export interface GameObjectSpec {
   lengthMm?: number; // x extent of the bounding box
@@ -57,15 +51,9 @@ export class GameObject extends Component {
     return this.heightMm;
   }
 
-  // The bounding box's footprint, used for stacking and inputs.
+  // The bounding box's footprint, used for stacking order and inputs.
   outlineMm(): Outline {
     return rectangleOutline(this.lengthMm, this.widthMm);
-  }
-
-  // The rendered 3D shape: prisms inside the bounding box, drawn bottom-up.
-  // Default: one prism filling the whole box.
-  shapeMm(): Prism[] {
-    return [{ outlineMm: this.outlineMm(), bottomMm: 0, topMm: this.heightMm }];
   }
 
   override assertValid(): void {

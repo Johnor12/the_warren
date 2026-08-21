@@ -3,7 +3,10 @@
  * - Component: subclasses must provide thicknessMm (vertical extent) and
  *   outlineMm(), the 2D footprint polygon in component-local mm coordinates
  *   (origin at the component center) used for stacking, hit testing, and
- *   side-face rendering. assertValid() checks the outline is a valid polygon;
+ *   side-face rendering. shapeMm() is the physical 3D shape as Prisms —
+ *   default one prism filling outline x thickness (right for cards and
+ *   solid objects); stacked pieces rest on the tallest prism under their
+ *   footprint. assertValid() checks the outline is a valid polygon;
  *   subclasses extend it with their own invariants.
  *   Overridable interaction handlers: onDoubleClick (default: nothing;
  *   Card overrides it to flip) and onDoubleRightClick (default: rotate to
@@ -11,6 +14,8 @@
  *   not defined here.
  * - Outline: a polygon as [x, y] points; edges wind so that edge p1 -> p2
  *   has outward normal (dy, -dx).
+ * - Prism: { outlineMm, bottomMm, topMm }, a vertical extrusion of a
+ *   polygon in component-local mm — the building block of shapeMm().
  * - rectangleOutline(w, h) / hexagonOutline(w, h): outline builders; the
  *   hexagon has vertices on the left/right and flat top/bottom edges.
  * - PieceState: the mutable on-board state handlers receive (position,
@@ -23,6 +28,15 @@ import { Polygon } from "../geometry/polygon.js";
 // A component's 2D footprint: [x, y] mm points around the component center,
 // wound so that edge p1 -> p2 has outward normal (dy, -dx).
 export type Outline = Polygon;
+
+// A vertical extrusion of a polygon: the building block of a component's
+// physical shape. outlineMm is in component-local mm around the center;
+// bottomMm/topMm are heights above the component's base.
+export interface Prism {
+  outlineMm: Outline;
+  bottomMm: number;
+  topMm: number;
+}
 
 export function rectangleOutline(widthMm: number, heightMm: number): Outline {
   const w = widthMm / 2;
@@ -69,6 +83,13 @@ export abstract class Component {
   // The component's 2D footprint in component-local mm coordinates (origin
   // at the center): stacking overlap, hit testing, and side faces.
   abstract outlineMm(): Outline;
+
+  // The physical 3D shape as prisms within outline x thickness: stacked
+  // pieces rest on the tallest prism under their footprint. Default: one
+  // prism filling the footprint (right for cards and solid objects).
+  shapeMm(): Prism[] {
+    return [{ outlineMm: this.outlineMm(), bottomMm: 0, topMm: this.thicknessMm }];
+  }
 
   // Double (left) click: nothing by default; Card overrides this to flip.
   onDoubleClick(piece: PieceState): void {

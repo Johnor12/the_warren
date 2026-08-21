@@ -135,6 +135,27 @@ test("objects stack with cards under the same rules", () => {
   );
 });
 
+test("a card resting on a tiered object's low tier moves with the object", () => {
+  class Tower extends GameObject {
+    constructor() {
+      super({ lengthMm: 20, widthMm: 20, heightMm: 30 });
+    }
+
+    override shapeMm() {
+      return [
+        { outlineMm: this.outlineMm(), bottomMm: 0, topMm: 18 },
+        { outlineMm: [[-3, -3], [3, -3], [3, 3], [-3, 3]] as [number, number][], bottomMm: 18, topMm: 30 },
+      ];
+    }
+  }
+  const board = new Board(200, 100);
+  board.place(new Tower(), 50, 50);
+  board.place(new PlainCard(), 38, 50); // rests on the 18mm base tier
+  board.movePiece(1, 60, 50);
+  // The card is physically supported by the tier, so it is carried along.
+  assert.deepEqual(board.pieces.map((p) => p.xMm), [60, 48]);
+});
+
 test("rotating and flipping never restack", () => {
   const board = new Board(200, 100);
   board.place(new PlainCard(), 50, 50);

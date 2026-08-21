@@ -42,7 +42,7 @@ function pieceToDto(piece: PlacedPiece): PieceDto {
   }
   if (component instanceof GameObject) {
     const { r, g, b } = component.color;
-    return { ...base, kind: "object", color: { r, g, b }, prisms: component.shapeMm() };
+    return { ...base, kind: "object", color: { r, g, b }, prisms: piece.prisms };
   }
   throw new Error(`${component.constructor.name} is neither a Card nor a GameObject`);
 }

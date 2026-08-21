@@ -19,11 +19,15 @@ Overlapping pieces stack in arrival order (z-indexes resolved by the
 Board): clicks hit the topmost piece anywhere on its visible body (top or
 side faces), moving a piece carries everything physically resting on it
 (not pieces merely overlapped from above — an overhanging card stays with
-its own stack) and shows the stack resting on whatever it would land on,
-and rotate/flip affect only the one piece. Rendered stack heights honor mixed thicknesses
-(a card on an 8mm cube sits at 8mm), draw order is a physical occlusion
-sort (a near tall piece draws over a far stack's raised cards), and a
-piece dropped over another's body lands on top of it, never inside it.
+its own stack) and shows every stack member where it would land if
+dropped right now (a carried card passing over a taller piece is shown
+settling onto it while the stack stays whole for the rest of the drag),
+and rotate/flip affect only the one piece. Pieces rest on actual shapes,
+not bounding boxes: heights honor mixed thicknesses (a card on an 8mm
+cube sits at 8mm) and shape prisms (on a tiered object's low tier, a card
+sits at that tier's top), draw order is a physical occlusion sort (a near
+tall piece draws over a far stack's raised cards), and a piece dropped
+over another's body lands on top of it, never inside it.
 
 ## Layout
 

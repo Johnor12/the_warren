@@ -1,8 +1,8 @@
 /* START
  * Board generation: the playing surface and the pieces placed on it.
  * - PlacedPiece: a component on the board with a unique id, a z-index (0 =
- *   on the table), its cached outline and thickness, and its mutable
- *   PieceState (center mm coordinates, rotation, which face is up).
+ *   on the table), its cached outline, thickness, and shape prisms, and its
+ *   mutable PieceState (center mm coordinates, rotation, which face is up).
  * - Board: playing surface with mm dimensions.
  *   - place(component, xMm, yMm): validate the component (Card or
  *     GameObject) and place it (its center) at the given coordinates,
@@ -18,7 +18,7 @@
  *   - describe(): human-readable summary of the board for logs.
  * END */
 
-import { Component, normalizeDeg, PieceState } from "../component/component.js";
+import { Component, normalizeDeg, PieceState, Prism } from "../component/component.js";
 import { Polygon } from "../geometry/polygon.js";
 import { carriedStack, resolveZ, restingZ } from "./stacking.js";
 
@@ -28,6 +28,7 @@ export interface PlacedPiece extends PieceState {
   zIndex: number;
   outlineMm: Polygon; // cached component.outlineMm(), for stacking overlap checks
   thicknessMm: number; // cached component.thicknessMm, for stack heights
+  prisms: Prism[]; // cached component.shapeMm(): the surface pieces rest on
 }
 
 export class Board {
@@ -59,6 +60,7 @@ export class Board {
       faceUp: true,
       outlineMm: component.outlineMm(),
       thicknessMm: component.thicknessMm,
+      prisms: component.shapeMm(),
     };
     piece.zIndex = restingZ(piece, this.pieces);
     this.pieces.push(piece);

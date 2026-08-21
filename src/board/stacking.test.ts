@@ -2,8 +2,10 @@
  * Unit tests for stacking.ts: rotated footprints, overlap between pieces,
  * carried-stack membership (transitive, physical support only), restingZ,
  * resolveZ
- * (arrival order, re-basing, moved stack landing on top), and stackBottoms
- * (physical heights with mixed thicknesses).
+ * (arrival order, re-basing, moved stack landing on top), stackBottoms
+ * (physical heights with mixed thicknesses; tiered shapes support at the
+ * prism under the footprint, not the bounding box), and landingBottoms
+ * (per-piece drop preview for a moving stack).
  * END */
 
 import { test } from "node:test";
@@ -12,6 +14,7 @@ import { rectangleOutline } from "../component/component.js";
 import {
   carriedStack,
   footprint,
+  landingBottoms,
   piecesOverlap,
   resolveZ,
   restingZ,
@@ -136,4 +139,50 @@ test("stackBottoms rests a bridging piece on the tallest support", () => {
   const bridge = square(5, 0, 1, 0, 0.3); // overlaps both cubes
   const bottoms = stackBottoms([shortCube, tallCube, bridge]);
   assert.equal(bottoms.get(bridge), 8);
+});
+
+// A 20x20x30mm two-tier tower at (x, y): a full-footprint 18mm base with a
+// narrow 30mm cap in the center.
+function tower(xMm: number, yMm: number, zIndex = 0): StackPiece {
+  return {
+    xMm,
+    yMm,
+    rotationDeg: 0,
+    zIndex,
+    outlineMm: rectangleOutline(20, 20),
+    thicknessMm: 30,
+    prisms: [
+      { outlineMm: rectangleOutline(20, 20), topMm: 18 },
+      { outlineMm: rectangleOutline(6, 6), topMm: 30 },
+    ],
+  };
+}
+
+test("stackBottoms rests a piece on the prism under it, not the bounding box", () => {
+  const base = tower(0, 0);
+  const onTier = square(-12, 0, 1, 0, 0.3); // overlaps only the 18mm base tier
+  const onCap = square(0, 0, 2, 0, 0.3); // overlaps the 30mm cap
+  const bottoms = stackBottoms([base, onTier, onCap]);
+  assert.equal(bottoms.get(onTier), 18);
+  assert.equal(bottoms.get(onCap), 30);
+});
+
+test("carriedStack carries a piece resting on a lower tier", () => {
+  const base = tower(0, 0);
+  const onTier = square(-12, 0, 1, 0, 0.3);
+  assert.deepEqual(carriedStack([base, onTier], base), [base, onTier]);
+});
+
+test("landingBottoms previews each moving piece's own landing height", () => {
+  const cube = square(14, 0, 0, 0, 8); // settled
+  const movingBase = square(0, 0, 0, 0, 0.3);
+  const movingTop = square(6, 0, 1, 0, 0.3); // carried, overhanging the base
+  // The overhanging top is over the cube: it would land on the cube's 8mm
+  // top while the base lands on the board.
+  const landing = landingBottoms([cube], [movingBase, movingTop]);
+  assert.equal(landing.get(movingBase), 0);
+  assert.equal(landing.get(movingTop), 8);
+  // Clear of the cube, the stack keeps its integrity: top back on base.
+  const clear = landingBottoms([cube], [square(40, 0, 0, 0, 0.3), square(46, 0, 1, 0, 0.3)]);
+  assert.deepEqual([...clear.values()], [0, 0.3]);
 });

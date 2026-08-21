@@ -27,9 +27,12 @@ rotation and flipping affect only the one piece.
     Component handlers, so subclasses cannot override them.
   - `centerX()`/`centerY()` give the board center; `describe()` returns a
     log-friendly summary.
-- `PlacedPiece` — `{ id, component, zIndex, outlineMm, thicknessMm }` plus
-  the mutable `PieceState` (`xMm`, `yMm`, `rotationDeg`, `faceUp`).
+- `PlacedPiece` — `{ id, component, zIndex, outlineMm, thicknessMm,
+  prisms }` plus the mutable `PieceState` (`xMm`, `yMm`, `rotationDeg`,
+  `faceUp`).
 - `stacking.ts` — the pure stacking rules (`piecesOverlap`, `carriedStack`,
-  `restingZ`, `resolveZ`, plus `stackBottoms` for physical heights when
-  thicknesses vary) over a minimal `StackPiece` shape; browser-safe, also
-  used by the renderer.
+  `restingZ`, `resolveZ`, `stackBottoms` for physical heights — pieces
+  rest on the tallest shape prism under their footprint, not on bounding
+  boxes — and `landingBottoms`, the per-piece drop preview for a moving
+  stack) over a minimal `StackPiece` shape; browser-safe, also used by
+  the renderer.
