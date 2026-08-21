@@ -17,9 +17,10 @@ bounding box (default 8mm cube) drives stacking and inputs, and an
 overridable prism shape inside it renders in a single surface color.
 Overlapping pieces stack in arrival order (z-indexes resolved by the
 Board): clicks hit the topmost piece anywhere on its visible body (top or
-side faces), moving a piece carries everything stacked on top of it and
-shows the stack resting on whatever it would land on, and rotate/flip
-affect only the one piece. Rendered stack heights honor mixed thicknesses
+side faces), moving a piece carries everything physically resting on it
+(not pieces merely overlapped from above — an overhanging card stays with
+its own stack) and shows the stack resting on whatever it would land on,
+and rotate/flip affect only the one piece. Rendered stack heights honor mixed thicknesses
 (a card on an 8mm cube sits at 8mm), draw order is a physical occlusion
 sort (a near tall piece draws over a far stack's raised cards), and a
 piece dropped over another's body lands on top of it, never inside it.

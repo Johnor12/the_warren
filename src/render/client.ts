@@ -15,13 +15,14 @@
  *   handlers (cards flip / snap-rotate 45°). Clicks always hit the topmost
  *   piece under the cursor. On empty board: left-drag pans, right-drag
  *   rotates the view, mouse wheel zooms about the cursor.
- *   Drag results are committed to the server on mouseup; the server responds
- *   with every piece's state (moves restack z-indexes), applied wholesale.
+ *   Drag results restack z-indexes locally on mouseup (shared stacking
+ *   rules, so the drop frame is already correct) and are committed to the
+ *   server, whose all-pieces response is applied wholesale.
  * - render() and helpers: clear to the table color, then draw each SceneOp
  *   (polygon fill, or face image via a canvas transform).
  * END */
 
-import { carriedStack } from "../board/stacking.js";
+import { carriedStack, resolveZ } from "../board/stacking.js";
 import { Camera, fitCamera, pan, rotateAbout, unproject, zoomAbout } from "./camera.js";
 import {
   buildScene,
@@ -212,6 +213,10 @@ function setupControls(ctx: Ctx): void {
       handleClick(done.piece);
     } else if (done.kind === "move") {
       ctx.drag = null;
+      // Restack locally with the same rules the server applies, so this
+      // frame already shows the drop result instead of flickering at stale
+      // z-indexes until the server responds.
+      resolveZ(ctx.board.pieces, done.stack.map((s) => s.piece));
       draw(ctx);
       commit(done.piece, "move", { xMm: done.piece.xMm, yMm: done.piece.yMm });
     } else {

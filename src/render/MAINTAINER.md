@@ -45,6 +45,8 @@
   board; piece move drags carrying the stack via `src/board/stacking.ts`,
   positioned each mousemove by scene.ts `resolveDrag` and rendered at the
   resolved landing height, rotate drags, and double-click POSTs on
-  pieces), applies the all-pieces POST responses, and rasterizes scene ops
+  pieces), restacks z-indexes locally on drop (shared `resolveZ`, so the
+  release frame matches the server result — no flicker while the POST is
+  in flight), applies the all-pieces POST responses, and rasterizes scene ops
   onto the canvas. Runs in the browser only (DOM APIs); bundled by the
   server with esbuild.

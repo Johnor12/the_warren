@@ -1,6 +1,7 @@
 /* START
  * Unit tests for stacking.ts: rotated footprints, overlap between pieces,
- * carried-stack membership (transitive, above only), restingZ, resolveZ
+ * carried-stack membership (transitive, physical support only), restingZ,
+ * resolveZ
  * (arrival order, re-basing, moved stack landing on top), and stackBottoms
  * (physical heights with mixed thicknesses).
  * END */
@@ -54,6 +55,25 @@ test("carriedStack takes the base and everything above it, transitively", () => 
   // Moving mid leaves base behind but still carries top.
   assert.deepEqual(carriedStack(pieces, mid), [mid, top]);
   assert.deepEqual(carriedStack(pieces, top), [top]);
+});
+
+test("carriedStack only carries pieces physically resting on the stack", () => {
+  const cube = square(0, 0, 0, 0, 8);
+  const overhang = square(6, 0, 1, 0, 0.3); // on the cube, hanging past its edge
+  const groundCard = square(12, 0, 0, 0, 0.3); // on the board, under the overhang
+  const pieces = [cube, overhang, groundCard];
+  // The overhang overlaps the ground card from above but rests on the cube,
+  // so moving the ground card must not steal it.
+  assert.deepEqual(carriedStack(pieces, groundCard), [groundCard]);
+  assert.deepEqual(carriedStack(pieces, cube), [cube, overhang]);
+});
+
+test("a bridge resting on two equal supports moves with either one", () => {
+  const left = square(0, 0, 0, 0, 8);
+  const right = square(10, 0, 0, 0, 8);
+  const bridge = square(5, 0, 1, 0, 0.3); // rests on both cubes
+  assert.deepEqual(carriedStack([left, right, bridge], left), [left, bridge]);
+  assert.deepEqual(carriedStack([left, right, bridge], right), [right, bridge]);
 });
 
 test("carriedStack ignores overlapping pieces below the base", () => {

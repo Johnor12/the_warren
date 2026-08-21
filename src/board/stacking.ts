@@ -7,8 +7,8 @@
  * - footprint(piece): the piece's outline in world mm coordinates.
  * - piecesOverlap(a, b): whether two pieces' footprints share area (a
  *   shared edge alone doesn't count).
- * - carriedStack(pieces, base): base plus everything stacked on top of it
- *   (transitively), ascending z — the set that moves when base moves.
+ * - carriedStack(pieces, base): base plus everything physically resting on
+ *   it (transitively), ascending z — the set that moves when base moves.
  * - restingZ(piece, others): the z a piece takes among others: on top of
  *   the highest overlapped piece, or 0 on the bare board.
  * - resolveZ(pieces, moved): reassign every z-index bottom-up after a move;
@@ -48,17 +48,28 @@ export function piecesOverlap(a: StackPiece, b: StackPiece): boolean {
   return polygonsOverlap(footprint(a), footprint(b));
 }
 
-// base plus every piece stacked on top of it — any piece overlapping a
-// member of the stack from a higher z, transitively — in ascending z order.
+// Equal stack heights can be reached by different thickness sums, so height
+// comparisons tolerate float drift.
+const HEIGHT_EPS_MM = 1e-6;
+
+// base plus every piece physically resting on it, transitively, in ascending
+// z order: a piece is carried when its bottom sits on a member's top and
+// their footprints overlap. Footprint overlap from a higher z alone is not
+// enough — a card overhanging its cube may hang above a ground card that
+// belongs to a different stack.
 export function carriedStack<T extends StackPiece>(pieces: T[], base: T): T[] {
+  const bottoms = stackBottoms(pieces);
+  const restsOn = (piece: T, support: T) =>
+    piece.zIndex > support.zIndex &&
+    Math.abs(bottoms.get(piece)! - (bottoms.get(support)! + support.thicknessMm)) <
+      HEIGHT_EPS_MM &&
+    piecesOverlap(piece, support);
   const stack = [base];
   const above = pieces
     .filter((p) => p !== base && p.zIndex > base.zIndex)
     .sort((a, b) => a.zIndex - b.zIndex);
   for (const piece of above) {
-    if (stack.some((m) => m.zIndex < piece.zIndex && piecesOverlap(piece, m))) {
-      stack.push(piece);
-    }
+    if (stack.some((member) => restsOn(piece, member))) stack.push(piece);
   }
   return stack;
 }

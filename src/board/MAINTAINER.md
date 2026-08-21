@@ -7,7 +7,10 @@
 - `stacking.ts` — pure stacking logic over the minimal `StackPiece` shape
   (satisfied by both `PlacedPiece` and the renderer's `PieceDto`):
   `footprint` (world-space outline), `piecesOverlap`, `carriedStack` (what
-  moves together), `restingZ`, `resolveZ` (z re-resolution after a move),
+  moves together: pieces physically resting on the stack, not everything
+  overlapping from a higher z — an overhanging card must not bind to a
+  ground card passing under it), `restingZ`, `resolveZ` (z re-resolution
+  after a move),
   and `stackBottoms` (each piece's physical bottom height in mm — pieces
   rest on the tallest overlapped top below them; z-indexes stay the
   stacking model, heights only drive rendering and hit testing). No node
