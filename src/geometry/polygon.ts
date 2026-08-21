@@ -8,6 +8,7 @@
  *   primitive behind polygon fills, masks, and shape validation.
  * - polygonsOverlap(a, b): whether two polygons' interiors overlap; shared
  *   edges/vertices alone (adjacent tiles) do not count.
+ * - convexHull(points): the convex hull of a point set, counterclockwise.
  * END */
 
 export type Polygon = [number, number][];
@@ -94,4 +95,23 @@ function edgesCross(a: Polygon, b: Polygon): boolean {
 
 function side(p: [number, number], q: [number, number], r: [number, number]): number {
   return Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+}
+
+// Andrew's monotone chain: the convex hull of a point set, counterclockwise
+// with collinear points dropped. Points on the hull are shared, not copied.
+export function convexHull(points: Polygon): Polygon {
+  const sorted = [...points].sort(([ax, ay], [bx, by]) => ax - bx || ay - by);
+  if (sorted.length < 3) return sorted;
+  const chain = (input: Polygon): Polygon => {
+    const out: Polygon = [];
+    for (const p of input) {
+      while (out.length >= 2 && side(out[out.length - 2], out[out.length - 1], p) <= 0) {
+        out.pop();
+      }
+      out.push(p);
+    }
+    out.pop(); // the chain's last point starts the other chain
+    return out;
+  };
+  return [...chain(sorted), ...chain([...sorted].reverse())];
 }

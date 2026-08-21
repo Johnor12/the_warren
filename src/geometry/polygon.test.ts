@@ -3,12 +3,13 @@
  * and a hexagon, including rows through and outside the shape and
  * agreement between the two functions; polygonsOverlap on partial overlap,
  * containment, coincidence, exact-edge adjacency (no overlap), and
- * vertex-free crossings.
+ * vertex-free crossings; convexHull on interior/collinear points and
+ * input-order independence.
  * END */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { pointInPolygon, Polygon, polygonsOverlap, rowSpans } from "./polygon.js";
+import { convexHull, pointInPolygon, Polygon, polygonsOverlap, rowSpans } from "./polygon.js";
 
 const RECT: Polygon = [
   [0, 0],
@@ -93,4 +94,32 @@ test("rowSpans agrees with pointInPolygon", () => {
       );
     }
   }
+});
+
+test("convexHull drops interior and collinear points, counterclockwise", () => {
+  const hull = convexHull([
+    [0, 0],
+    [5, 3], // interior
+    [10, 0],
+    [5, 0], // collinear on the bottom edge
+    [10, 6],
+    [0, 6],
+  ]);
+  assert.deepEqual(hull, [
+    [0, 0],
+    [10, 0],
+    [10, 6],
+    [0, 6],
+  ]);
+});
+
+test("convexHull is independent of input order", () => {
+  const points: Polygon = [
+    [10, 6],
+    [0, 0],
+    [5, 3],
+    [0, 6],
+    [10, 0],
+  ];
+  assert.deepEqual(convexHull(points), convexHull([...points].reverse()));
 });

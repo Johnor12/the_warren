@@ -14,3 +14,5 @@ directories.
 - `polygonsOverlap(a, b)` — whether two polygons' interiors share area;
   touching along an edge or at a vertex (tiles laid side by side) does not
   count. Used by the stacking system's overlap checks.
+- `convexHull(points)` — the convex hull of a point set, counterclockwise.
+  Used by the renderer's paint-order occlusion sweep.

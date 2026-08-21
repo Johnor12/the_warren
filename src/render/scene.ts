@@ -6,28 +6,29 @@
  *   pixel (0,0), xCorner = (width,0), yCorner = (0,height)). Face bitmaps
  *   map to the card shape (transparent outside the outline), so image ops
  *   need no clipping.
- * - Lift: pieces raised above the board (the stack being dragged), floating
- *   at an explicit base height; carried pieces keep their in-stack heights.
- * - buildScene(board, cam, lift?): board surface polygon, then each piece
- *   back-to-front (painter's algorithm: z-index, then view depth, lifted
- *   pieces on top). Physical heights come from stackBottoms (thicknesses
+ * - Drag: the stack being dragged (dragged piece + carried pieces), with
+ *   the height its base would land at right now; the stack is rendered at
+ *   exactly its drop pose, and carried pieces keep their in-stack heights.
+ * - buildScene(board, cam, drag?): board surface polygon, then each piece
+ *   back-to-front (paintOrder: a physical occlusion sort — overlapping
+ *   footprints draw bottom-up, disjoint ones far-to-near along the view
+ *   direction). Physical heights come from stackBottoms (thicknesses
  *   vary — a card on an 8mm cube renders at 8mm). Cards draw their
  *   camera-facing outline-edge side polygons plus the visible-face image
  *   op; objects draw each prism bottom-up as shaded side polygons plus a
  *   top polygon in the surface color. Both honor rotation.
- * - pickPiece(board, cam, sx, sy): topmost piece under a screen point,
+ * - pickPiece(board, cam, sx, sy): frontmost piece under a screen point,
  *   testing the piece's full projected silhouette (top, bottom, and side
  *   faces of its outline extrusion), so clicking a 3D body works.
- * - resolveDrag(board, cam, sx, sy, spec): height-aware drag: reads the
- *   ambiguous isometric cursor against each candidate support height
- *   (board or a settled piece's top) and returns the highest physically
- *   consistent position — so a piece released over another's body lands
- *   on top of it; undefined over inconsistent slivers (keep the last).
+ * - resolveDrag(board, cam, sx, sy, spec): reads the cursor on the fixed
+ *   plane the piece was grabbed on (1:1 screen-to-world motion, no jumps)
+ *   and returns the position plus the support height the piece would land
+ *   on there — the tallest settled piece its footprint overlaps, or 0.
  * - pieceTopMm(pieces, piece): height of a piece's top face above the board.
  * END */
 
-import { piecesOverlap, stackBottoms } from "../board/stacking.js";
-import { pointInPolygon, Polygon } from "../geometry/polygon.js";
+import { footprint, piecesOverlap, stackBottoms } from "../board/stacking.js";
+import { convexHull, pointInPolygon, Polygon, polygonsOverlap } from "../geometry/polygon.js";
 import { Camera, project, unproject } from "./camera.js";
 import { BoardDto, ObjectDto, PieceDto } from "./types.js";
 
@@ -53,9 +54,9 @@ export interface ImageOp {
 
 export type SceneOp = PolygonOp | ImageOp;
 
-export interface Lift {
+export interface Drag {
   pieceIds: number[]; // the dragged piece and everything stacked on it
-  bottomMm: number; // height of the dragged stack's base while floating
+  bottomMm: number; // height the dragged stack's base would land at
 }
 
 // Height of the piece's top face above the board, given every piece on it
@@ -64,7 +65,7 @@ export function pieceTopMm(pieces: PieceDto[], piece: PieceDto): number {
   return stackBottoms(pieces).get(piece)! + piece.thicknessMm;
 }
 
-export function buildScene(board: BoardDto, cam: Camera, lift?: Lift): SceneOp[] {
+export function buildScene(board: BoardDto, cam: Camera, drag?: Drag): SceneOp[] {
   const ops: SceneOp[] = [
     {
       kind: "polygon",
@@ -77,21 +78,27 @@ export function buildScene(board: BoardDto, cam: Camera, lift?: Lift): SceneOp[]
       ],
     },
   ];
-  // The lifted stack is airborne: it doesn't rest on (or support) settled
+  // The dragged stack is in motion: it doesn't rest on (or support) settled
   // pieces. Carried pieces keep their heights within the stack itself.
-  const liftedIds = new Set(lift?.pieceIds ?? []);
-  const bottoms = stackBottoms(board.pieces.filter((p) => !liftedIds.has(p.id)));
-  const innerBottoms = stackBottoms(board.pieces.filter((p) => liftedIds.has(p.id)));
-  for (const piece of paintOrder(board.pieces, cam, lift)) {
-    const bottomMm = liftedIds.has(piece.id)
-      ? lift!.bottomMm + innerBottoms.get(piece)!
-      : bottoms.get(piece)!;
-    ops.push(...pieceOps(piece, cam, bottomMm));
+  const dragIds = new Set(drag?.pieceIds ?? []);
+  const settledBottoms = stackBottoms(board.pieces.filter((p) => !dragIds.has(p.id)));
+  const innerBottoms = stackBottoms(board.pieces.filter((p) => dragIds.has(p.id)));
+  const bottoms = new Map<PieceDto, number>();
+  for (const piece of board.pieces) {
+    bottoms.set(
+      piece,
+      dragIds.has(piece.id)
+        ? drag!.bottomMm + innerBottoms.get(piece)!
+        : settledBottoms.get(piece)!,
+    );
+  }
+  for (const piece of paintOrder(board.pieces, cam, bottoms)) {
+    ops.push(...pieceOps(piece, cam, bottoms.get(piece)!));
   }
   return ops;
 }
 
-// Topmost piece whose projected silhouette contains screen point (sx, sy).
+// Frontmost piece whose projected silhouette contains screen point (sx, sy).
 export function pickPiece(
   board: BoardDto,
   cam: Camera,
@@ -99,7 +106,7 @@ export function pickPiece(
   sy: number,
 ): PieceDto | undefined {
   const bottoms = stackBottoms(board.pieces);
-  return [...paintOrder(board.pieces, cam)]
+  return [...paintOrder(board.pieces, cam, bottoms)]
     .reverse()
     .find((piece) =>
       silhouette(piece, cam, bottoms.get(piece)!).some((poly) => pointInPolygon(sx, sy, poly)),
@@ -127,62 +134,132 @@ function silhouette(piece: PieceDto, cam: Camera, bottomMm: number): Polygon[] {
 }
 
 // What a drag gesture needs resolved: the piece being dragged (the carried
-// stack moves with it, so it can't rest on any of its members) and the
-// cursor's grab offset from the piece center on its top face.
+// stack moves with it, so it can't rest on any of its members), the
+// cursor's grab offset from the piece center on its top face, and the
+// height of the plane the piece was grabbed on (its top face at grab time).
 export interface DragSpec {
   piece: PieceDto;
   carriedIds: number[];
   grabXMm: number;
   grabYMm: number;
+  grabZMm: number;
 }
 
-// Interpret the cursor for a dragged piece. A screen point is ambiguous in
-// isometric projection (near-and-low vs far-and-high); read it against each
-// candidate support height — the board, or a settled piece's top — and keep
-// the highest physically consistent one: the piece's footprint there
-// actually rests on that support. So a piece released over another's body
-// lands on top of it, never inside it. Undefined when no candidate is
-// consistent (the cursor sits over a piece's lower edge): keep the last
-// resolved position.
+// Interpret the cursor for a dragged piece: read it on the fixed horizontal
+// plane the piece was grabbed on, so cursor motion maps 1:1 to world motion
+// — the landing height never feeds back into the position, which is what
+// kept the old drag sticking and jumping at piece edges. supportMm is what
+// the piece would land on at that position (the tallest settled piece its
+// footprint overlaps, or the board): the stack is rendered, and dropped, at
+// exactly that height.
 export function resolveDrag(
   board: BoardDto,
   cam: Camera,
   sx: number,
   sy: number,
   spec: DragSpec,
-): { xMm: number; yMm: number; supportMm: number } | undefined {
+): { xMm: number; yMm: number; supportMm: number } {
+  const [wx, wy] = unproject(cam, sx, sy, spec.grabZMm);
+  const xMm = clamp(wx - spec.grabXMm, 0, board.widthMm);
+  const yMm = clamp(wy - spec.grabYMm, 0, board.heightMm);
   const carried = new Set(spec.carriedIds);
   const settled = board.pieces.filter((p) => !carried.has(p.id));
   const bottoms = stackBottoms(settled);
-  const tops = settled.map((p) => bottoms.get(p)! + p.thicknessMm);
-  const candidates = [...new Set([0, ...tops])].sort((a, b) => b - a);
-  for (const supportMm of candidates) {
-    const [wx, wy] = unproject(cam, sx, sy, supportMm + spec.piece.thicknessMm);
-    const xMm = clamp(wx - spec.grabXMm, 0, board.widthMm);
-    const yMm = clamp(wy - spec.grabYMm, 0, board.heightMm);
-    const candidate = { ...spec.piece, xMm, yMm };
-    const restsOn = settled
-      .filter((p) => piecesOverlap(candidate, p))
-      .reduce((top, p) => Math.max(top, bottoms.get(p)! + p.thicknessMm), 0);
-    if (Math.abs(restsOn - supportMm) < 1e-9) return { xMm, yMm, supportMm };
-  }
-  return undefined;
+  const candidate = { ...spec.piece, xMm, yMm };
+  const supportMm = settled
+    .filter((p) => piecesOverlap(candidate, p))
+    .reduce((top, p) => Math.max(top, bottoms.get(p)! + p.thicknessMm), 0);
+  return { xMm, yMm, supportMm };
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-// Painter's algorithm: the lifted stack last (it hovers above everything),
-// otherwise lower stacks first, then back-to-front in view space.
-function paintOrder(pieces: PieceDto[], cam: Camera, lift?: Lift): PieceDto[] {
-  const cos = Math.cos(cam.yaw);
-  const sin = Math.sin(cam.yaw);
-  const depth = (p: PieceDto) => p.xMm * (cos + sin) + p.yMm * (cos - sin);
-  const lifted = (p: PieceDto) => (lift?.pieceIds.includes(p.id) ? 1 : 0);
-  return [...pieces].sort(
-    (a, b) => lifted(a) - lifted(b) || a.zIndex - b.zIndex || depth(a) - depth(b),
+// Painter's algorithm as a physical occlusion sort. Two pieces constrain
+// each other only if their bodies can overlap on screen (bounding-box
+// prescreen): pieces whose footprints share area stack vertically, so the
+// lower one draws first; for disjoint footprints, the far one draws first —
+// "far" meaning sweeping its footprint along the view direction runs into
+// the other's (z-indexes order pieces within a stack, so they say nothing
+// about occlusion between stacks). A topological sort seeded far-to-near
+// applies the constraints; cycles (interlocking concave outlines) fall
+// back to seed order.
+const SWEEP_MM = 1e4; // sweep length: far beyond any board
+function paintOrder(
+  pieces: PieceDto[],
+  cam: Camera,
+  bottoms: Map<PieceDto, number>,
+): PieceDto[] {
+  const vx = Math.cos(cam.yaw) + Math.sin(cam.yaw); // view direction, world
+  const vy = Math.cos(cam.yaw) - Math.sin(cam.yaw);
+  const depth = (p: PieceDto) => p.xMm * vx + p.yMm * vy;
+  const seed = [...pieces].sort(
+    (a, b) => depth(a) - depth(b) || bottoms.get(a)! - bottoms.get(b)! || a.zIndex - b.zIndex,
   );
+  const feet = seed.map(footprint);
+  const sweeps = feet.map((foot) =>
+    convexHull([...foot, ...foot.map(([x, y]): [number, number] => [x + vx * SWEEP_MM, y + vy * SWEEP_MM])]),
+  );
+  const boxes = seed.map((p, i) => screenBox(feet[i], cam, bottoms.get(p)!, p.thicknessMm));
+  const before: number[][] = seed.map(() => []);
+  for (let i = 0; i < seed.length; i++) {
+    for (let j = i + 1; j < seed.length; j++) {
+      if (!boxesOverlap(boxes[i], boxes[j])) continue;
+      if (polygonsOverlap(feet[i], feet[j])) {
+        const cmp =
+          bottoms.get(seed[i])! - bottoms.get(seed[j])! || seed[i].zIndex - seed[j].zIndex;
+        if (cmp < 0) before[j].push(i);
+        else if (cmp > 0) before[i].push(j);
+      } else if (polygonsOverlap(sweeps[i], feet[j])) {
+        before[j].push(i); // j blocks i's line to the camera: i is behind
+      } else if (polygonsOverlap(sweeps[j], feet[i])) {
+        before[i].push(j);
+      }
+    }
+  }
+  const state = seed.map(() => 0); // 0 unvisited, 1 visiting, 2 done
+  const order: PieceDto[] = [];
+  const visit = (i: number): void => {
+    if (state[i]) return;
+    state[i] = 1;
+    for (const b of before[i]) if (state[b] !== 1) visit(b);
+    state[i] = 2;
+    order.push(seed[i]);
+  };
+  for (let i = 0; i < seed.length; i++) visit(i);
+  return order;
+}
+
+// Screen-space bounding box of a piece's body (footprint at its bottom and
+// top heights), for the can-these-overlap-on-screen prescreen.
+function screenBox(
+  foot: Polygon,
+  cam: Camera,
+  bottomMm: number,
+  thicknessMm: number,
+): [number, number, number, number] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [x, y] of foot) {
+    for (const z of [bottomMm, bottomMm + thicknessMm]) {
+      const [sx, sy] = project(cam, x, y, z);
+      minX = Math.min(minX, sx);
+      minY = Math.min(minY, sy);
+      maxX = Math.max(maxX, sx);
+      maxY = Math.max(maxY, sy);
+    }
+  }
+  return [minX, minY, maxX, maxY];
+}
+
+function boxesOverlap(
+  a: [number, number, number, number],
+  b: [number, number, number, number],
+): boolean {
+  return a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
 }
 
 function pieceOps(piece: PieceDto, cam: Camera, bottomMm: number): SceneOp[] {

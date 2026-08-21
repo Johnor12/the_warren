@@ -5,9 +5,10 @@ TypeScript (object-oriented, with inheritance), composed into a board object,
 and rendered and manipulated in a web UI. See `README.md` for the full
 product vision. Current state: component/image/board core plus an isometric
 renderer with camera controls (pan, zoom, rotate) and piece interaction
-(drag to move with a visual lift, right-drag to rotate, double click to
-flip cards, double right click to snap-rotate 45°; the double clicks are
-overridable Component handlers). Cards can be non-rectangular (an
+(drag to move — the piece renders where it would land if dropped at that
+moment — right-drag to rotate, double click to flip cards, double right
+click to snap-rotate 45°; the double clicks are overridable Component
+handlers). Cards can be non-rectangular (an
 overridable outline polygon, e.g. hexagons) and any size; face bitmaps map
 to the card's 2D shape (opaque only inside the outline, enforced on
 placement) and can be imported from PNG files. 3D objects (`GameObject`)
@@ -17,17 +18,19 @@ overridable prism shape inside it renders in a single surface color.
 Overlapping pieces stack in arrival order (z-indexes resolved by the
 Board): clicks hit the topmost piece anywhere on its visible body (top or
 side faces), moving a piece carries everything stacked on top of it and
-floats the stack over whatever it would land on, and rotate/flip affect
-only the one piece. Rendered stack heights honor mixed thicknesses (a card
-on an 8mm cube sits at 8mm), and drags are height-aware: a piece dropped
-over another's body lands on top of it, never inside it.
+shows the stack resting on whatever it would land on, and rotate/flip
+affect only the one piece. Rendered stack heights honor mixed thicknesses
+(a card on an 8mm cube sits at 8mm), draw order is a physical occlusion
+sort (a near tall piece draws over a far stack's raised cards), and a
+piece dropped over another's body lands on top of it, never inside it.
 
 ## Layout
 
 - `src/units/` — mm <-> pixel conversion (`PX_PER_MM`, `mmToPx`, `pxToMm`).
 - `src/geometry/` — pure 2D polygon math (`pointInPolygon`, scanline
-  `rowSpans`, `polygonsOverlap`), shared by card validation, image
-  rasterization, hit testing, and stacking overlap checks.
+  `rowSpans`, `polygonsOverlap`, `convexHull`), shared by card validation,
+  image rasterization, hit testing, stacking overlap checks, and the
+  renderer's occlusion sort.
 - `src/image/` — the `Image` RGBA bitmap class, paint composition,
   generators (`solidImage`, `textImage`, embedded 5x7 font, bilinear
   `scaledImage`, `polygonImage` shape fill, `maskedImage`), and PNG

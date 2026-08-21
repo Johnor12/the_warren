@@ -3,14 +3,16 @@
  * the emitted draw ops — then apply each camera mutation (pan, zoom,
  * rotate) and confirm the scene renders as expected: shifted points,
  * scaled points, flipped draw order and side faces. Also covers piece
- * state rendering (rotation, face-down, lift), stacks (bottom-up draw
- * order, a lifted piece floating over a tall stack, topmost-piece picking),
- * pickPiece hit testing (full-silhouette: side faces of 3D bodies are
- * clickable), non-rectangular outlines (hexagon sides, image clip, hit
+ * state rendering (rotation, face-down, a dragged stack at its drop
+ * height), stacks (bottom-up draw order, topmost-piece picking), the
+ * occlusion paint order (a near tall piece draws over a far stack's raised
+ * cards; a resting card draws over its support cube regardless of view
+ * depth), pickPiece hit testing (full-silhouette: side faces of 3D bodies
+ * are clickable), non-rectangular outlines (hexagon sides, image clip, hit
  * testing), 3D objects (prism side/top polygons with shaded colors,
- * physical heights when cards stack on cubes), and resolveDrag (the
- * height-aware drag: stays on a support while overlapping, reads the board
- * plane when clear, undefined over inconsistent slivers).
+ * physical heights when cards stack on cubes), and resolveDrag (cursor
+ * read on the grab plane, landing support from footprint overlaps, no
+ * dead zones crossing piece edges).
  * END */
 
 import { test } from "node:test";
@@ -121,13 +123,9 @@ test("a face-down piece renders its back image", () => {
   );
 });
 
-test("a lifted piece floats at the lift's base height and is drawn on top", () => {
+test("a dragged piece renders at the drag's base height", () => {
   const ops = buildScene(BOARD, CAM, { pieceIds: [1], bottomMm: 20 });
-  assert.deepEqual(
-    imageOps(ops).map((op) => op.url),
-    ["/pieces/2/front.png", "/pieces/1/front.png"],
-  );
-  assertClose(imageOps(ops)[1].origin, project(CAM, 45, 45, 20 + Z_TOP));
+  assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 20 + Z_TOP));
 });
 
 // A 200x100mm board with a 10-piece stack at (50, 50) (ids 1-10, z 0-9)
@@ -139,30 +137,27 @@ function makeStackBoard(): BoardDto {
   return boardToDto(board);
 }
 
-test("a stack is drawn bottom-up, lower layers everywhere first", () => {
+test("a stack is drawn bottom-up", () => {
   const ops = buildScene(makeStackBoard(), CAM);
   const urls = imageOps(ops).map((op) => op.url);
   assert.equal(urls.length, 11);
-  // z 0 back-to-front (stack bottom, then the nearer lone piece), then the
-  // stack's remaining layers in z order.
   assert.equal(urls[0], "/pieces/1/front.png");
-  assert.equal(urls[1], "/pieces/11/front.png");
-  assert.equal(urls[10], "/pieces/10/front.png");
+  assert.equal(urls[9], "/pieces/10/front.png");
   // The stack's top face sits 10 thicknesses up.
-  assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 10 * 0.3));
+  assertClose(imageOps(ops)[9].origin, project(CAM, 45, 45, 10 * 0.3));
 });
 
-test("a piece dragged past a tall stack floats over it, never through it", () => {
+test("a piece dragged over a tall stack renders on top of it, never inside it", () => {
   const board = makeStackBoard();
-  // Piece 11 (z 0) dragged directly over the 10-piece stack.
+  // Piece 11 (z 0) dragged directly over the 10-piece stack: it would land
+  // on the stack's 3mm top.
   board.pieces[10].xMm = 50;
   board.pieces[10].yMm = 50;
-  const ops = buildScene(board, CAM, { pieceIds: [11], bottomMm: 20 });
+  const ops = buildScene(board, CAM, { pieceIds: [11], bottomMm: 3 });
   const urls = imageOps(ops).map((op) => op.url);
-  // Painted after every stack piece (over it), and physically above the
-  // stack's 3mm top: floating at 20mm.
+  // Painted after every stack piece (over it), sitting on the stack's top.
   assert.equal(urls[10], "/pieces/11/front.png");
-  assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 20 + 0.3));
+  assertClose(imageOps(ops)[10].origin, project(CAM, 45, 45, 3 + 0.3));
 });
 
 test("clicking a stack picks the topmost piece", () => {
@@ -337,40 +332,71 @@ test("pickPiece on a stacked cube's side picks that cube", () => {
   assert.equal(pickPiece(board, CAM, ...project(CAM, 54, 50, 4))?.id, 1);
 });
 
-// Dragging the stacked top cube, grabbed at its top-face center.
+// Dragging the stacked top cube, grabbed at its top-face center (16mm up).
 function dragTopCube(board: BoardDto) {
-  return { piece: board.pieces[1], carriedIds: [2], grabXMm: 0, grabYMm: 0 };
+  return { piece: board.pieces[1], carriedIds: [2], grabXMm: 0, grabYMm: 0, grabZMm: 16 };
 }
 
 test("resolveDrag keeps a cube dragged partway down another cube on top of it", () => {
   const board = makeCubeStackBoard();
-  // The cursor over the bottom cube: read on its 8mm top, still overlapping.
+  // The cursor over the bottom cube: the footprints still overlap, so the
+  // piece would land on the bottom cube's 8mm top.
   const res = resolveDrag(board, CAM, ...project(CAM, 53, 53, 16), dragTopCube(board));
-  assert.equal(res?.supportMm, 8);
-  assertClose([res!.xMm, res!.yMm], [53, 53]);
+  assert.equal(res.supportMm, 8);
+  assertClose([res.xMm, res.yMm], [53, 53]);
 });
 
-test("resolveDrag reads the cursor on the board plane once the footprint is clear", () => {
+test("resolveDrag lands the piece on the board once the footprint is clear", () => {
   const board = makeCubeStackBoard();
   const res = resolveDrag(board, CAM, ...project(CAM, 70, 70, 16), dragTopCube(board));
-  // The same screen point on the 8mm-lower plane sits 8mm further in view
-  // direction: the piece lands where it appears, never inside the cube.
-  assert.equal(res?.supportMm, 0);
-  assertClose([res!.xMm, res!.yMm], [62, 62]);
+  assert.equal(res.supportMm, 0);
+  assertClose([res.xMm, res.yMm], [70, 70]);
 });
 
-test("resolveDrag is undefined over a physically inconsistent sliver", () => {
+test("resolveDrag tracks the cursor 1:1 across a cube's edge, no dead zone", () => {
   const board = makeCubeStackBoard();
-  // Past the cube's edge on its top plane, but overlapping it on the board
-  // plane: no consistent resting spot — the caller keeps the last position.
-  assert.equal(resolveDrag(board, CAM, ...project(CAM, 59, 59, 16), dragTopCube(board)), undefined);
+  // Dragging the top cube south-east off the bottom cube: the cursor always
+  // reads on the grab plane (position follows exactly), and the support
+  // drops from 8 to 0 the moment the 8x8 footprints stop overlapping
+  // (piece center 8mm past the cube center at 50).
+  for (let t = 50; t <= 70; t += 0.5) {
+    const res = resolveDrag(board, CAM, ...project(CAM, t, t, 16), dragTopCube(board));
+    assertClose([res.xMm, res.yMm], [t, t]);
+    assert.equal(res.supportMm, t < 58 ? 8 : 0, `support at ${t}`);
+  }
 });
 
-test("a lifted stack keeps its inner heights above the lift base", () => {
+test("a dragged stack keeps its inner heights above the drag base", () => {
   const board = new Board(200, 100);
   board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
   board.place(new TestCard(), 50, 50);
   const ops = buildScene(boardToDto(board), CAM, { pieceIds: [1, 2], bottomMm: 20 });
-  // The carried card rides on the floating cube: 20 + 8mm up.
+  // The carried card rides on the dragged cube: 20 + 8mm up.
   assertClose(imageOps(ops)[0].origin, project(CAM, 45, 45, 20 + 8 + 0.3));
+});
+
+test("a tall piece in front of a stack draws over the stack's raised cards", () => {
+  const board = new Board(200, 100);
+  for (let i = 0; i < 3; i++) board.place(new TestCard(), 50, 50); // z 0-2
+  // A 30mm tower just south-east of the stack: nearer the camera, footprints
+  // disjoint. Its z-index (0) says nothing about occlusion between stacks —
+  // it must still draw over every card behind it.
+  board.place(new GameObject({ lengthMm: 12, widthMm: 12, heightMm: 30, color: CUBE_COLOR }), 50, 62);
+  const ops = buildScene(boardToDto(board), CAM);
+  const lastImage = ops.map((op) => op.kind).lastIndexOf("image");
+  const firstTower = ops.findIndex(
+    (op) => op.kind === "polygon" && op.color.startsWith("rgb("),
+  );
+  assert.ok(firstTower > lastImage, `tower op ${firstTower} before card op ${lastImage}`);
+});
+
+test("a card resting on a cube draws over it even when extending away from the camera", () => {
+  const board = new Board(200, 100);
+  board.place(new GameObject({ color: CUBE_COLOR }), 50, 50);
+  // The card rests on the cube's near corner; its center (and most of its
+  // body) is farther from the camera than the cube. View depth alone would
+  // draw it first — the resting order must win.
+  board.place(new TestCard(), 44, 44);
+  const ops = buildScene(boardToDto(board), CAM);
+  assert.equal(ops[ops.length - 1].kind, "image");
 });
